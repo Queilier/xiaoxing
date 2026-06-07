@@ -68,6 +68,9 @@
     }
 
     .chat-box {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
       height: 430px;
       overflow-y: auto;
       background: #fbfdff;
@@ -75,27 +78,37 @@
       border-radius: 20px;
       padding: 18px;
       margin-top: 20px;
-      text-align: left;
+      min-width: 0;
     }
 
     .message {
-      max-width: 78%;
+      display: inline-block;
+      max-width: 70%;
+      width: auto;
       padding: 13px 16px;
       border-radius: 18px;
       margin: 12px 0;
       font-size: 18px;
       line-height: 1.55;
       white-space: pre-wrap;
+      word-break: break-word;
+      box-sizing: border-box;
     }
 
     .user {
-      margin-left: auto;
+      display: block;
+      align-self: flex-end;
       background: #e8f5ff;
+      margin-right: 0;
+      margin-left: auto;
     }
 
     .assistant {
-      margin-right: auto;
+      display: block;
+      align-self: flex-start;
       background: #fff7df;
+      margin-left: 0;
+      margin-right: auto;
     }
 
     .controls {
@@ -167,7 +180,7 @@
       }
 
       .message {
-        max-width: 90%;
+        max-width: 80%;
         font-size: 17px;
       }
 
