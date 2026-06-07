@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>小星科学探索</title>
+
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, "Microsoft YaHei", sans-serif;
+      background: linear-gradient(180deg, #f4fbff 0%, #fffdf5 100%);
+      min-height: 100vh;
+      color: #263238;
+    }
+
+    .page {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 40px 20px;
+    }
+
+    .card {
+      background: white;
+      border-radius: 28px;
+      padding: 30px;
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.08);
+      border: 1px solid #eef3f7;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 8px 18px;
+      border-radius: 999px;
+      background: #e8f5ff;
+      font-size: 18px;
+      margin-bottom: 12px;
+    }
+
+    h1 {
+      font-size: 38px;
+      margin: 8px 0 12px;
+      text-align: center;
+    }
+
+    .subtitle {
+      font-size: 21px;
+      line-height: 1.7;
+      text-align: center;
+      margin: 0 auto 22px;
+      max-width: 680px;
+    }
+
+    .participant-area {
+      margin-bottom: 14px;
+      text-align: center;
+    }
+
+    .participant-input {
+      width: 100%;
+      max-width: 340px;
+      font-size: 18px;
+      padding: 12px 16px;
+      border-radius: 999px;
+      border: 1px solid #d8e2ea;
+      outline: none;
+      text-align: center;
+      font-family: Arial, "Microsoft YaHei", sans-serif;
+    }
+
+    .chat-box {
+      height: 430px;
+      overflow-y: auto;
+      background: #fbfdff;
+      border: 1px solid #edf2f7;
+      border-radius: 20px;
+      padding: 18px;
+      margin-top: 20px;
+      text-align: left;
+    }
+
+    .message {
+      max-width: 78%;
+      padding: 13px 16px;
+      border-radius: 18px;
+      margin: 12px 0;
+      font-size: 18px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+    }
+
+    .user {
+      margin-left: auto;
+      background: #e8f5ff;
+    }
+
+    .assistant {
+      margin-right: auto;
+      background: #fff7df;
+    }
+
+    .controls {
+      display: flex;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    input {
+      flex: 1;
+      font-size: 18px;
+      padding: 14px 16px;
+      border-radius: 999px;
+      border: 1px solid #d8e2ea;
+      outline: none;
+      font-family: Arial, "Microsoft YaHei", sans-serif;
+    }
+
+    button {
+      font-size: 18px;
+      padding: 12px 22px;
+      border-radius: 999px;
+      border: none;
+      cursor: pointer;
+      background: #e8f5ff;
+      color: #263238;
+      font-family: Arial, "Microsoft YaHei", sans-serif;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none;
+    }
+
+    button:hover {
+      background: #d8efff;
+    }
+
+    .primary {
+      background: #dff4df;
+    }
+
+    .primary:hover {
+      background: #cdefcd;
+    }
+
+    .voice-button {
+      background: #fff3cd;
+      min-width: 130px;
+    }
+
+    .voice-button.recording {
+      background: #ffe69c;
+      transform: scale(0.98);
+    }
+
+    .status {
+      margin-top: 12px;
+      color: #607d8b;
+      font-size: 15px;
+      text-align: center;
+    }
+
+    @media (max-width: 700px) {
+      h1 {
+        font-size: 32px;
+      }
+
+      .subtitle {
+        font-size: 18px;
+      }
+
+      .message {
+        max-width: 90%;
+        font-size: 17px;
+      }
+
+      .controls {
+        flex-direction: column;
+      }
+
+      button {
+        width: 100%;
+      }
+
+      .participant-input {
+        max-width: 100%;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="page">
+    <div class="card">
+      <div style="text-align:center;">
+        <div class="badge">科学小视频活动</div>
+        <h1>小星科学探索</h1>
+        <p class="subtitle">
+          你可以和小星一起探索有趣的科学现象。<br />
+          按住“按住说话”按钮，说完后松开，小星会回答并读出来。
+        </p>
+      </div>
+
+      <div style="text-align:center;">
+        <div class="participant-area">
+          <input
+            id="participantId"
+            class="participant-input"
+            placeholder="请输入被试编号，例如 child_001"
+          />
+        </div>
+
+        <button class="primary" onclick="startChat()">开始探索</button>
+        <button onclick="resetChat()">重新开始</button>
+      </div>
+
+      <div id="chatBox" class="chat-box"></div>
+
+      <div class="controls">
+        <input id="userInput" placeholder="也可以在这里打字输入问题..." />
+
+        <button
+          id="holdToTalkButton"
+          class="voice-button"
+          onmousedown="startHoldVoiceInput(event)"
+          onmouseup="stopHoldVoiceInput(event)"
+          onmouseleave="cancelHoldVoiceInput(event)"
+          ontouchstart="startHoldVoiceInput(event)"
+          ontouchend="stopHoldVoiceInput(event)"
+          ontouchcancel="cancelHoldVoiceInput(event)"
+        >
+          按住说话
+        </button>
+
+        <button onclick="sendMessage()">发送</button>
+      </div>
+
+      <div id="status" class="status">
+        请先输入被试编号，然后点击“开始探索”。
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let recognition = null;
+    let isHoldingToTalk = false;
+    let finalTranscript = "";
+    let isSending = false;
+    let audioUnlocked = false;
+    let currentAudio = null;
+
+    function getSpeechRecognition() {
+      return window.SpeechRecognition || window.webkitSpeechRecognition;
+    }
+
+    function getParticipantId() {
+      const input = document.getElementById("participantId");
+      const value = input.value.trim();
+
+      if (value) {
+        return value;
+      }
+
+      return "test_user";
+    }
+
+    async function unlockAudio() {
+      try {
+        const audio = new Audio(
+          "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQQAAAAAAA=="
+        );
+        await audio.play();
+        audioUnlocked = true;
+      } catch (error) {
+        console.log("声音激活失败：", error);
+      }
+    }
+
+    function addMessage(role, text) {
+      const chatBox = document.getElementById("chatBox");
+      const div = document.createElement("div");
+
+      div.className = "message " + role;
+      div.innerText = text;
+
+      chatBox.appendChild(div);
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    async function startChat() {
+      await unlockAudio();
+
+      const participantId = getParticipantId();
+
+      if (participantId === "test_user") {
+        document.getElementById("status").innerText =
+          "请先输入被试编号，例如 child_001。";
+        return;
+      }
+
+      const chatBox = document.getElementById("chatBox");
+
+      if (chatBox.children.length === 0) {
+        addMessage(
+          "assistant",
+          "小朋友你好！让我们一起来进行科学探索吧！你准备好开始了吗？"
+        );
+      }
+
+      document.getElementById("status").innerText =
+        "当前被试编号：" + participantId + "。现在可以开始和小星聊天啦。";
+    }
+
+    function startHoldVoiceInput(event) {
+      if (event) {
+        event.preventDefault();
+      }
+
+      const participantId = getParticipantId();
+
+      if (participantId === "test_user") {
+        document.getElementById("status").innerText =
+          "请先输入被试编号，例如 child_001。";
+        return;
+      }
+
+      if (isSending) {
+        document.getElementById("status").innerText =
+          "小星正在回复，请等一下再说话。";
+        return;
+      }
+
+      const SpeechRecognition = getSpeechRecognition();
+
+      if (!SpeechRecognition) {
+        document.getElementById("status").innerText =
+          "这个浏览器暂时不支持语音输入，请换 Chrome 浏览器，或者直接打字。";
+        return;
+      }
+
+      if (isHoldingToTalk) return;
+
+      isHoldingToTalk = true;
+      finalTranscript = "";
+
+      const input = document.getElementById("userInput");
+      input.value = "";
+
+      const button = document.getElementById("holdToTalkButton");
+      button.innerText = "松开发送";
+      button.classList.add("recording");
+
+      recognition = new SpeechRecognition();
+      recognition.lang = "zh-CN";
+      recognition.interimResults = true;
+      recognition.continuous = true;
+
+      document.getElementById("status").innerText = "小星正在听你说话……";
+
+      recognition.onresult = function (event) {
+        let interimTranscript = "";
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const text = event.results[i][0].transcript;
+
+          if (event.results[i].isFinal) {
+            finalTranscript += text;
+          } else {
+            interimTranscript += text;
+          }
+        }
+
+        const currentText = finalTranscript + interimTranscript;
+        document.getElementById("userInput").value = currentText;
+      };
+
+      recognition.onerror = function (event) {
+        console.error("语音识别错误：", event.error);
+
+        isHoldingToTalk = false;
+        resetHoldButton();
+
+        if (event.error === "not-allowed") {
+          document.getElementById("status").innerText =
+            "浏览器没有麦克风权限，请允许麦克风后再试。";
+        } else {
+          document.getElementById("status").innerText =
+            "刚刚没有听清楚，可以再按住说一次，或者直接打字。";
+        }
+      };
+
+      recognition.onend = function () {
+        if (isHoldingToTalk) {
+          return;
+        }
+
+        const text = document.getElementById("userInput").value.trim();
+
+        resetHoldButton();
+
+        if (text) {
+          document.getElementById("status").innerText =
+            "我听到的是：“" + text + "”。正在发送给小星……";
+          sendMessage();
+        } else {
+          document.getElementById("status").innerText =
+            "刚刚没有听到内容，可以再按住说一次。";
+        }
+      };
+
+      try {
+        recognition.start();
+      } catch (error) {
+        console.error("启动语音识别失败：", error);
+
+        isHoldingToTalk = false;
+        resetHoldButton();
+
+        document.getElementById("status").innerText =
+          "语音输入启动失败，可以再试一次。";
+      }
+    }
+
+    function stopHoldVoiceInput(event) {
+      if (event) {
+        event.preventDefault();
+      }
+
+      if (!isHoldingToTalk) return;
+
+      isHoldingToTalk = false;
+
+      document.getElementById("status").innerText =
+        "语音输入结束，正在整理你说的话……";
+
+      if (recognition) {
+        recognition.stop();
+      }
+    }
+
+    function cancelHoldVoiceInput(event) {
+      if (event) {
+        event.preventDefault();
+      }
+
+      if (!isHoldingToTalk) return;
+
+      isHoldingToTalk = false;
+
+      if (recognition) {
+        recognition.stop();
+      }
+
+      resetHoldButton();
+
+      document.getElementById("status").innerText =
+        "已经取消这次语音输入，可以重新按住说话。";
+    }
+
+    function resetHoldButton() {
+      const button = document.getElementById("holdToTalkButton");
+      button.innerText = "按住说话";
+      button.classList.remove("recording");
+    }
+
+    async function playTTS(text) {
+      if (currentAudio) {
+        currentAudio.pause();
+        currentAudio.currentTime = 0;
+      }
+
+      const ttsResponse = await fetch("/api/tts", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          text: text,
+        }),
+      });
+
+      if (!ttsResponse.ok) {
+        let errMsg = "TTS 语音生成失败";
+        try {
+          const errData = await ttsResponse.json();
+          errMsg = errData.error || errMsg;
+        } catch {}
+        throw new Error(errMsg);
+      }
+
+      const audioBlob = await ttsResponse.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+
+      currentAudio = new Audio(audioUrl);
+      await currentAudio.play();
+    }
+
+    async function sendMessage() {
+      if (isSending) return;
+
+      const participantId = getParticipantId();
+
+      if (participantId === "test_user") {
+        document.getElementById("status").innerText =
+          "请先输入被试编号，例如 child_001。";
+        return;
+      }
+
+      const input = document.getElementById("userInput");
+      const userText = input.value.trim();
+
+      if (!userText) return;
+
+      isSending = true;
+
+      addMessage("user", userText);
+      input.value = "";
+
+      document.getElementById("status").innerText = "小星正在想一想……";
+
+      try {
+        const chatResponse = await fetch("/api/chat", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            message: userText,
+            user_id: participantId,
+          }),
+        });
+
+        const chatData = await chatResponse.json();
+
+        if (!chatResponse.ok) {
+          throw new Error(chatData.error || "AI 回复失败");
+        }
+
+        const replyText = chatData.reply;
+
+        addMessage("assistant", replyText);
+
+        document.getElementById("status").innerText =
+          "小星正在说话……";
+
+        await playTTS(replyText);
+
+        document.getElementById("status").innerText =
+          "小星已经回复啦。你可以继续按住按钮说话。";
+      } catch (error) {
+        console.error(error);
+        document.getElementById("status").innerText =
+          "出错了：" + error.message;
+      } finally {
+        isSending = false;
+      }
+    }
+
+    async function resetChat() {
+      try {
+        await fetch("/api/reset", {
+          method: "POST",
+        });
+
+        document.getElementById("chatBox").innerHTML = "";
+        document.getElementById("userInput").value = "";
+        document.getElementById("status").innerText =
+          "已经重新开始。请重新确认被试编号，然后点击“开始探索”。";
+
+        if (recognition) {
+          recognition.stop();
+        }
+
+        if (currentAudio) {
+          currentAudio.pause();
+          currentAudio.currentTime = 0;
+        }
+
+        isHoldingToTalk = false;
+        isSending = false;
+        finalTranscript = "";
+        audioUnlocked = false;
+        resetHoldButton();
+      } catch (error) {
+        console.error(error);
+        document.getElementById("status").innerText =
+          "重新开始时出错了：" + error.message;
+      }
+    }
+
+    document
+      .getElementById("userInput")
+      .addEventListener("keydown", function (event) {
+        if (event.key === "Enter") {
+          sendMessage();
+        }
+      });
+  </script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: xiaoxing-api-chat
+    env: node
+    plan: free
+    branch: main
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: COZE_API_TOKEN
+        value: "<YOUR_COZE_API_TOKEN>"
+      - key: COZE_BOT_ID
+        value: "<YOUR_COZE_BOT_ID>"
+      - key: COZE_USER_ID
+        value: "child_001"
+      - key: COZE_VOICE_ID
+        value: "7620288417930297386"
