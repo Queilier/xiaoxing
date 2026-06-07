@@ -322,7 +322,7 @@ async function callAIProvider({ currentTopic, userQuestion, conversationHistory,
 
 // ─── FIXED RESULT CONSTANTS ─────────────────────────────────────────────────
 const ENDING_REPLY =
-  "恭喜小朋友！你已经成功完成了今天科学主题的探索！你刚刚提出的问题都很有意思，真的很像一个小小科学家。希望你喜欢这次科学探索，再见啦！";
+  "恭喜小朋友！你已经成功完成了今天科学主题的探索！再见啦！";
 
 const FOLLOWUP_REPLY =
   "没关系，你可以提任何和刚刚的视频主题有关的问题。你还有问题吗？";
@@ -392,7 +392,7 @@ async function handleExperimentFlow(state, userText, userId, chatHistory = []) {
     // FIX #7: always init to false for a freshly chosen topic
     state.noQuestionFollowUpUsed[topic] = false;
     return {
-      reply: `太棒啦！我们先来看和「${topic}」有关的科学视频。视频播放结束后，请对我说'视频看完了'，然后我们就可以开始讨论啦！`,
+      reply: `太棒啦！我们先来看和「${correctedTopic}」有关的科学视频。视频播放结束后，请对我说'视频看完了'，然后我们就可以开始讨论啦！`,
       nextState: state,
     };
   }
