@@ -99,6 +99,66 @@ function parseName(text = "") {
   return clean || null;
 }
 
+/**
+ * 识别用户最后一次明确的主题选择，处理纠正、多主题同时出现等情况。
+ * 根据 Prompt 1.2 规则实现：
+ * - "我想选主题1，不对，我想选主题2" → 主题2
+ * - "主题12不对不对我想选主题2" → 主题2
+ * - "不是主题一，是主题二" → 主题2
+ * - "我不要遇水开花，我想看站立的牙签" → 主题2
+ * - "我想选主题2，不对，还是主题1" → 主题1
+ *
+ * @param {string} text - 用户输入文本
+ * @returns {string|null} - 最后确定的主题名称，或 null 如果没有明确纠正
+ */
+function extractTopicWithCorrection(text = "") {
+  if (!text) return null;
+
+  const clean = text.toLowerCase();
+
+  // 纠正词汇列表：出现这些词意味着用户在纠正之前的选择
+  const correctionMarkers = /不对|不是|说错了|换成|不要|还是|再想想|反正|其实|应该是|我要|我想选|我想看/gi;
+
+  // 主题1的关键词集合
+  const topic1Keywords = /主题\s*1|主题一|第一个|第1个|我选第一个|遇水开花|开花|花|纸花|水里的花/gi;
+
+  // 主题2的关键词集合
+  const topic2Keywords = /主题\s*2|主题二|第二个|第2个|我选第二个|站立的牙签|牙签|站起来|站立/gi;
+
+  // 找出所有主题提及的位置和类型
+  const mentions = [];
+
+  let match;
+  while ((match = topic1Keywords.exec(clean)) !== null) {
+    mentions.push({ pos: match.index, len: match[0].length, topic: "遇水开花" });
+  }
+  while ((match = topic2Keywords.exec(clean)) !== null) {
+    mentions.push({ pos: match.index, len: match[0].length, topic: "站立的牙签" });
+  }
+
+  // 找出所有纠正词的位置
+  const corrections = [];
+  while ((match = correctionMarkers.exec(clean)) !== null) {
+    corrections.push({ pos: match.index, len: match[0].length });
+  }
+
+  // 如果没有任何主题提及，返回 null
+  if (mentions.length === 0) return null;
+
+  // 如果只有一个主题提及且没有纠正词，返回 null（不是纠正）
+  if (mentions.length === 1 && corrections.length === 0) return null;
+
+  // 如果有纠正词或多个主题提及，则返回最后一个主题
+  if (mentions.length > 1 || corrections.length > 0) {
+    const lastMention = mentions.reduce((latest, current) =>
+      current.pos > latest.pos ? current : latest
+    );
+    return lastMention.topic;
+  }
+
+  return null;
+}
+
 function buildTopicListReply() {
   return `今天让我们一起来探索一些有趣的科学小现象吧！\n\n接下来我会分别给你播放两个科学小视频哦。每看完一个视频之后，你都可以提出任何和这个主题有关的问题。\n\n一共有两个视频主题：\n\n- 主题 1：遇水开花\n- 主题 2：站立的牙签\n\n你想先选哪个主题呢？`;
 }
@@ -299,7 +359,20 @@ async function handleExperimentFlow(state, userText, userId, chatHistory = []) {
     };
   }
 
-  if (state.phase === "choosing_topic") {
+  if (state.phase === "choosing_topic") {    // 【优先级最高】检查主题纠正
+    const correctedTopic = extractTopicWithCorrection(userText);
+    if (correctedTopic && correctedTopic !== state.currentTopic) {
+      // 用户纠正了主题选择
+      state.currentTopic = correctedTopic;
+      state.phase = "waiting_video_done";
+      state.currentTopicNoQuestionPrompted = false;
+      return {
+        reply: `好的，那我们换成「${correctedTopic}」这个主题。视频播放结束后，请对我说'视频看完了'，然后我们就可以开始讨论啦！`,
+        nextState: state,
+      };
+    }
+
+    // 常规主题选择
     const topic = chooseTopic(text);
     if (!topic) {
       return {
@@ -317,6 +390,19 @@ async function handleExperimentFlow(state, userText, userId, chatHistory = []) {
   }
 
   if (state.phase === "waiting_video_done") {
+    // 【优先级最高】检查主题纠正：用户可以在视频开始前改变主题选择
+    const correctedTopic = extractTopicWithCorrection(userText);
+    if (correctedTopic && correctedTopic !== state.currentTopic) {
+      // 用户纠正了主题选择
+      state.currentTopic = correctedTopic;
+      state.currentTopicNoQuestionPrompted = false;
+      return {
+        reply: `好的，那我们换成「${correctedTopic}」这个主题。视频播放结束后，请对我说'视频看完了'，然后我们就可以开始讨论啦！`,
+        nextState: state,
+      };
+    }
+
+    // 检查用户是否确认视频看完
     if (isVideoDone(text)) {
       state.phase = "qa";
       state.currentTopicNoQuestionPrompted = false;
@@ -325,6 +411,7 @@ async function handleExperimentFlow(state, userText, userId, chatHistory = []) {
         nextState: state,
       };
     }
+    
     return {
       reply: `请看完视频后告诉我“视频看完了”。这样我才能回答你的问题。`,
       nextState: state,
