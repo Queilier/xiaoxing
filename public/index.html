@@ -230,6 +230,7 @@
         </button>
 
         <button onclick="sendMessage()">发送</button>
+        <button id="downloadDataBtn" onclick="downloadData()">下载数据</button>
       </div>
 
       <div id="status" class="status">
@@ -239,6 +240,93 @@
   </div>
 
   <script>
+    const STORAGE_KEY = "xiaoxing_experimentData";
+
+    function loadExperimentData() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        return raw ? JSON.parse(raw) : null;
+      } catch (e) {
+        console.error("加载 experimentData 失败：", e);
+        return null;
+      }
+    }
+
+    function saveExperimentData() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(window.experimentData || {}));
+      } catch (e) {
+        console.error("保存 experimentData 失败：", e);
+      }
+    }
+
+    function recordEvent(type, data) {
+      try {
+        window.experimentData = window.experimentData || {
+          childId: null,
+          startTime: null,
+          endTime: null,
+          condition: null,
+          chatHistory: [],
+          responses: [],
+          pageEvents: [],
+          errors: [],
+        };
+
+        window.experimentData.pageEvents.push({
+          t: new Date().toISOString(),
+          type,
+          data: data || {},
+        });
+
+        saveExperimentData();
+      } catch (e) {
+        console.error("recordEvent 失败：", e);
+      }
+    }
+
+    // Initialize global experimentData from localStorage if exists
+    window.experimentData = loadExperimentData() || {
+      childId: null,
+      startTime: null,
+      endTime: null,
+      condition: null,
+      chatHistory: [],
+      responses: [],
+      pageEvents: [],
+      errors: [],
+    };
+
+    // Record page load
+    recordEvent("page_load", { url: window.location.href });
+
+    // Visibility and beforeunload handlers
+    document.addEventListener("visibilitychange", () => {
+      recordEvent("visibility_change", { state: document.visibilityState });
+    });
+
+    window.addEventListener("beforeunload", () => {
+      try {
+        window.experimentData.endTime = new Date().toISOString();
+        saveExperimentData();
+      } catch (e) {}
+    });
+
+    window.addEventListener("error", (e) => {
+      try {
+        window.experimentData.errors.push({
+          t: new Date().toISOString(),
+          message: e.message,
+          filename: e.filename,
+          lineno: e.lineno,
+          colno: e.colno,
+        });
+        saveExperimentData();
+      } catch (err) {
+        console.error("记录错误失败：", err);
+      }
+    });
+
     let recognition = null;
     let isHoldingToTalk = false;
     let finalTranscript = "";
@@ -255,6 +343,10 @@
       const value = input.value.trim();
 
       if (value) {
+        // save childId to experimentData immediately
+        window.experimentData = window.experimentData || {};
+        window.experimentData.childId = value;
+        saveExperimentData();
         return value;
       }
 
@@ -303,6 +395,16 @@
           "小朋友你好！让我们一起来进行科学探索吧！你准备好开始了吗？"
         );
       }
+
+      // set experiment start time if not set
+      if (!window.experimentData.startTime) {
+        window.experimentData.startTime = new Date().toISOString();
+      }
+
+      window.experimentData.childId = participantId || window.experimentData.childId;
+      saveExperimentData();
+
+      recordEvent("start_chat", { childId: participantId });
 
       document.getElementById("status").innerText =
         "当前被试编号：" + participantId + "。现在可以开始和小星聊天啦。";
@@ -398,6 +500,9 @@
         if (text) {
           document.getElementById("status").innerText =
             "我听到的是：“" + text + "”。正在发送给小星……";
+          // record transcribed user message
+          window.experimentData.chatHistory.push({ role: "user", text, t: new Date().toISOString(), via: "voice" });
+          saveExperimentData();
           sendMessage();
         } else {
           document.getElementById("status").innerText =
@@ -433,6 +538,7 @@
       if (recognition) {
         recognition.stop();
       }
+      recordEvent("voice_end", { childId: getParticipantId() });
     }
 
     function cancelHoldVoiceInput(event) {
@@ -452,6 +558,8 @@
 
       document.getElementById("status").innerText =
         "已经取消这次语音输入，可以重新按住说话。";
+
+      recordEvent("voice_cancel", { childId: getParticipantId() });
     }
 
     function resetHoldButton() {
@@ -490,6 +598,7 @@
 
       currentAudio = new Audio(audioUrl);
       await currentAudio.play();
+      recordEvent("tts_play", { text: text, childId: getParticipantId() });
     }
 
     async function sendMessage() {
@@ -509,6 +618,10 @@
       if (!userText) return;
 
       isSending = true;
+
+      // record user message
+      window.experimentData.chatHistory.push({ role: "user", text: userText, t: new Date().toISOString(), via: "text" });
+      saveExperimentData();
 
       addMessage("user", userText);
       input.value = "";
@@ -535,6 +648,11 @@
 
         const replyText = chatData.reply;
 
+        // record assistant reply
+        window.experimentData.chatHistory.push({ role: "assistant", text: replyText, t: new Date().toISOString() });
+        window.experimentData.responses.push({ text: replyText, t: new Date().toISOString() });
+        saveExperimentData();
+
         addMessage("assistant", replyText);
 
         document.getElementById("status").innerText =
@@ -548,6 +666,10 @@
         console.error(error);
         document.getElementById("status").innerText =
           "出错了：" + error.message;
+
+        // record error
+        window.experimentData.errors.push({ t: new Date().toISOString(), message: error.message });
+        saveExperimentData();
       } finally {
         isSending = false;
       }
@@ -582,6 +704,51 @@
         console.error(error);
         document.getElementById("status").innerText =
           "重新开始时出错了：" + error.message;
+      }
+    }
+
+    // Record input changes for participantId and userInput
+    document.getElementById("participantId").addEventListener("change", (e) => {
+      recordEvent("input_participantId", { value: e.target.value });
+    });
+
+    document.getElementById("userInput").addEventListener("change", (e) => {
+      recordEvent("input_user", { value: e.target.value });
+    });
+
+    // Record general clicks (avoid logging too frequently for inputs)
+    document.addEventListener("click", (e) => {
+      try {
+        const el = e.target;
+        const info = {
+          tag: el.tagName,
+          id: el.id || null,
+          classes: el.className || null,
+          text: (el.innerText || "").slice(0, 100),
+        };
+        recordEvent("click", info);
+      } catch (err) {}
+    });
+
+    // Download data helper
+    function downloadData() {
+      try {
+        const data = window.experimentData || {};
+        const child = data.childId || "unknown_child";
+        const filename = `${child}_science_exploration_data.json`;
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+
+        recordEvent("download_data", { filename });
+      } catch (e) {
+        console.error("导出数据失败：", e);
       }
     }
 
