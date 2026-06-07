@@ -361,15 +361,17 @@
       return window.SpeechRecognition || window.webkitSpeechRecognition;
     }
 
-    function getParticipantId() {
+    // Get participant id from input. If `save` is true, persist to experimentData.
+    function getParticipantId(save = false) {
       const input = document.getElementById("participantId");
       const value = input.value.trim();
 
       if (value) {
-        // save childId to experimentData immediately
-        window.experimentData = window.experimentData || {};
-        window.experimentData.childId = value;
-        saveExperimentData();
+        if (save) {
+          window.experimentData = window.experimentData || {};
+          window.experimentData.childId = value;
+          saveExperimentData();
+        }
         return value;
       }
 
@@ -443,7 +445,7 @@
     async function startChat() {
       await unlockAudio();
 
-      const participantId = getParticipantId();
+      const participantId = getParticipantId(false);
 
       if (participantId === "test_user") {
         document.getElementById("status").innerText =
@@ -464,6 +466,19 @@
           errors: [],
         };
       }
+      // If a different childId is being started, clear previous session data.
+      const previousChild = window.experimentData.childId || null;
+      if (previousChild && previousChild !== participantId) {
+        // clear previous session but keep pageEvents (for export)
+        clearExperimentSession();
+        recordEvent("session_closed", { previousChildId: previousChild });
+      }
+
+      // persist new childId and initialize start time when starting
+      window.experimentData.childId = participantId;
+      if (!window.experimentData.startTime) {
+        window.experimentData.startTime = new Date().toISOString();
+      }
 
       if (chatBox.children.length === 0) {
         if (window.experimentData.chatHistory.length > 0) {
@@ -481,13 +496,6 @@
       }
 
       syncExperimentState(window.experimentData.experimentState);
-
-      // set experiment start time if not set
-      if (!window.experimentData.startTime) {
-        window.experimentData.startTime = new Date().toISOString();
-      }
-
-      window.experimentData.childId = participantId || window.experimentData.childId;
       saveExperimentData();
 
       recordEvent("start_chat", { childId: participantId });
@@ -794,19 +802,22 @@
 
     async function resetChat() {
       try {
-        await fetch("/api/reset", {
-          method: "POST",
-        });
+        // ask backend for cleared nextState (not strictly necessary but keeps parity)
+        const res = await fetch("/api/reset", { method: "POST", headers: { "Content-Type": "application/json" } });
+        let resData = null;
+        try {
+          resData = await res.json();
+        } catch (e) {}
+
+        // clear frontend session (including childId) so researcher can enter a new ID
+        clearExperimentSession(true);
 
         document.getElementById("chatBox").innerHTML = "";
         document.getElementById("userInput").value = "";
         document.getElementById("status").innerText =
           "已经重新开始。请重新确认被试编号，然后点击“开始探索”。";
 
-        if (recognition) {
-          recognition.stop();
-        }
-
+        if (recognition) recognition.stop();
         if (currentAudio) {
           currentAudio.pause();
           currentAudio.currentTime = 0;
@@ -821,6 +832,39 @@
         console.error(error);
         document.getElementById("status").innerText =
           "重新开始时出错了：" + error.message;
+      }
+    }
+
+    // Clear experiment session data in frontend. If keepPageEvents is true, retain pageEvents for exports.
+    function clearExperimentSession(keepPageEvents = true) {
+      try {
+        const preserved = (window.experimentData && window.experimentData.pageEvents && keepPageEvents)
+          ? window.experimentData.pageEvents.slice() : [];
+
+        window.experimentData = {
+          childId: null,
+          childName: null,
+          startTime: null,
+          endTime: null,
+          condition: null,
+          experimentState: {
+            phase: "waiting_ready",
+            childName: null,
+            currentTopic: null,
+            completedTopics: [],
+            currentTopicNoQuestionPrompted: false,
+            messages: [],
+            errors: [],
+          },
+          chatHistory: [],
+          responses: [],
+          pageEvents: preserved,
+          errors: [],
+        };
+
+        saveExperimentData();
+      } catch (e) {
+        console.error("clearExperimentSession failed:", e);
       }
     }
 

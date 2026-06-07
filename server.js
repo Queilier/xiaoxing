@@ -49,7 +49,7 @@ function normalizeText(text = "") {
 
 function isNoQuestion(text = "") {
   const clean = normalizeText(text).toLowerCase();
-  return /^(没(?:有(?:了)?)?|没问题|没有问题|我没有问题|不用了|不用|不想问(?:了)?|问完了|不知道|没有了)$/i.test(clean);
+  return /^(没(?:有(?:了)?)?|没问题(?:了)?|没有问题(?:了)?|我没有问题|不用了|不用|不想问(?:了)?|问完了|不知道(?:问什么)?|没有了|没有想问(?:的)?|没想问的|结束吧|结束(?:了)?|再见|今天到这里(?:吧)?|全部结束|活动结束|不想继续了|没了|没有)$/i.test(clean);
 }
 
 function isNextTopicIntent(text = "") {
@@ -420,6 +420,17 @@ async function handleExperimentFlow(state, userText, userId, chatHistory = []) {
 
   if (state.phase === "qa") {
     if (isNoQuestion(text) || isNextTopicIntent(text)) {
+      // 【优先级最高】检查两个主题是否都已完成
+      const completedCount = new Set(state.completedTopics || []).size;
+      if (completedCount >= 2 && isNoQuestion(text)) {
+        // 两个主题都已完成，用户表达没有问题 → 直接自动结束
+        state.phase = "finished";
+        return {
+          reply: "恭喜小朋友！你已经成功完成了今天科学主题的探索！你刚刚提出的问题都很有意思，真的很像一个小小科学家。希望你喜欢这次科学探索，再见啦！",
+          nextState: state,
+        };
+      }
+
       if (!state.currentTopicNoQuestionPrompted && isNoQuestion(text)) {
         state.currentTopicNoQuestionPrompted = true;
         return {
@@ -435,14 +446,14 @@ async function handleExperimentFlow(state, userText, userId, chatHistory = []) {
         state.currentTopicNoQuestionPrompted = false;
         state.phase = "waiting_video_done";
         return {
-          reply: `好的！那我们接下来看看另一个主题：「${nextTopic}」。视频播放结束后，请对我说‘视频看完了’，然后我们就可以开始讨论啦！`,
+          reply: `好的！那我们接下来看看另一个主题：「${nextTopic}」。视频播放结束后，请对我说'视频看完了'，然后我们就可以开始讨论啦！`,
           nextState: state,
         };
       }
 
       state.phase = "finished";
       return {
-        reply: "今天我们已经一起探索了「遇水开花」和「站立的牙签」两个主题啦！你刚才提出的问题都很有意思，谢谢你和小星一起探索科学！",
+        reply: "恭喜小朋友！你已经成功完成了今天科学主题的探索！你刚刚提出的问题都很有意思，真的很像一个小小科学家。希望你喜欢这次科学探索，再见啦！",
         nextState: state,
       };
     }
@@ -461,8 +472,9 @@ async function handleExperimentFlow(state, userText, userId, chatHistory = []) {
   }
 
   if (state.phase === "finished") {
+    // 活动已结束，任何输入都保持结束状态，不再继续
     return {
-      reply: "活动已经结束了。你已经完成了今天的科学探索。",
+      reply: "恭喜小朋友！你已经成功完成了今天科学主题的探索！你刚刚提出的问题都很有意思，真的很像一个小小科学家。希望你喜欢这次科学探索，再见啦！",
       nextState: state,
     };
   }
@@ -563,7 +575,14 @@ app.post("/api/tts", async (req, res) => {
 });
 
 app.post("/api/reset", (req, res) => {
-  res.json({ ok: true });
+  // 支持前端在创建新被试时请求后端返回一个清空的 nextState
+  try {
+    const nextState = initExperimentState();
+    res.json({ ok: true, nextState });
+  } catch (err) {
+    console.error("/api/reset error:", err);
+    res.status(500).json({ ok: false, error: err.message || "reset failed" });
+  }
 });
 
 // Ensure unknown /api/* routes always return JSON instead of HTML
