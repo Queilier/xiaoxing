@@ -1,154 +1,194 @@
 import express from "express";
 import dotenv from "dotenv";
+import path from "path";
+import fs from "fs/promises";
+import { fileURLToPath } from "url";
 
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const publicPath = path.join(__dirname, "public");
+const promptsPath = path.join(__dirname, "prompts");
 
 const app = express();
 const port = process.env.PORT || 3000;
 
 app.use(express.json());
-app.use(express.static("public"));
 
 const COZE_API_TOKEN = process.env.COZE_API_TOKEN;
 const COZE_BOT_ID = process.env.COZE_BOT_ID;
 const COZE_USER_ID = process.env.COZE_USER_ID || "child_001";
 const COZE_VOICE_ID = process.env.COZE_VOICE_ID || "7620288417930297386";
 
-app.post("/api/chat", async (req, res) => {
-  try {
-    const userText = req.body.message;
-    const userId = req.body.user_id || COZE_USER_ID || "test_user";
+const TOPICS = ["遇水开花", "站立的牙签"];
+const SCIENCE_ANSWER_PROMPT_TEMPLATE = await fs.readFile(
+  path.join(promptsPath, "science-answer-prompt.md"),
+  "utf-8"
+);
 
-    console.log("收到用户输入：", userText);
-    console.log("当前被试编号：", userId);
+function initExperimentState(state = {}) {
+  return {
+    phase: state.phase || "waiting_ready",
+    childName: state.childName || null,
+    currentTopic: state.currentTopic || null,
+    completedTopics: Array.isArray(state.completedTopics) ? state.completedTopics : [],
+    currentTopicNoQuestionPrompted: Boolean(state.currentTopicNoQuestionPrompted),
+    messages: Array.isArray(state.messages) ? state.messages : [],
+    errors: Array.isArray(state.errors) ? state.errors : [],
+  };
+}
 
-    if (!userText || typeof userText !== "string") {
-      return res.status(400).json({ error: "message 不能为空" });
+function normalizeText(text = "") {
+  return text
+    .toString()
+    .trim()
+    .replace(/[。！？?!.，,]/g, "")
+    .replace(/\s+/g, " ");
+}
+
+function isNoQuestion(text = "") {
+  const clean = normalizeText(text).toLowerCase();
+  return /^(没(?:有(?:了)?)?|没问题|没有问题|我没有问题|不用了|不用|不想问(?:了)?|问完了|不知道|没有了)$/i.test(clean);
+}
+
+function isNextTopicIntent(text = "") {
+  const clean = normalizeText(text).toLowerCase();
+  return /^(下一个吧|换一个|看另一个|我想看下一个|看下一个视频吧|下一个|换一(个|个主题)|再看一个)$/i.test(clean);
+}
+
+function isVideoDone(text = "") {
+  const clean = normalizeText(text).toLowerCase();
+  return /^(视频看完了|看完了|我看完了|好了|好啦|可以了|好|ok)$/i.test(clean);
+}
+
+function isReady(text = "") {
+  return /^(准备好了|好了|开始吧|可以|好|嗯|ready|yes)$/i.test(normalizeText(text));
+}
+
+function chooseTopic(text = "") {
+  const clean = normalizeText(text).toLowerCase();
+  if (/(主题\s*1|主题一|第一个|第1个|我选第一个|遇水开花|开花|花|纸花|水里的花)/i.test(clean)) {
+    return "遇水开花";
+  }
+  if (/(主题\s*2|主题二|第二个|第2个|我选第二个|站立的牙签|牙签|站起来|站立)/i.test(clean)) {
+    return "站立的牙签";
+  }
+  for (const topic of TOPICS) {
+    if (clean.includes(topic)) return topic;
+  }
+  return null;
+}
+
+function chooseNextTopic(state) {
+  const done = new Set(state.completedTopics || []);
+  for (const topic of TOPICS) {
+    if (!done.has(topic) && topic !== state.currentTopic) {
+      return topic;
     }
+  }
+  return null;
+}
 
-    if (!COZE_API_TOKEN || !COZE_BOT_ID) {
-      return res.status(500).json({
-        error: "缺少 COZE_API_TOKEN 或 COZE_BOT_ID，请检查 .env 文件。",
-      });
-    }
+function parseName(text = "") {
+  const clean = normalizeText(text);
+  const match = clean.match(/^(?:我叫|我是|叫我)?\s*(.+)$/);
+  if (match && match[1]) {
+    return match[1].replace(/[,，.!！?？]$/, "");
+  }
+  return clean || null;
+}
 
-    const chatResponse = await fetch("https://api.coze.cn/v3/chat", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${COZE_API_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        bot_id: COZE_BOT_ID,
-        user_id: userId,
-        stream: false,
-        auto_save_history: true,
-        additional_messages: [
-          {
-            role: "user",
-            content: userText,
-            content_type: "text",
-          },
-        ],
-      }),
-    });
+function buildTopicListReply() {
+  return `今天让我们一起来探索一些有趣的科学小现象吧！\n\n接下来我会分别给你播放两个科学小视频哦。每看完一个视频之后，你都可以提出任何和这个主题有关的问题。\n\n一共有两个视频主题：\n\n- 主题 1：遇水开花\n- 主题 2：站立的牙签\n\n你想先选哪个主题呢？`;
+}
 
-    const chatText = await chatResponse.text();
-    console.log("Coze /v3/chat 原始返回：", chatText);
+function formatConversationHistory(messages = []) {
+  return messages
+    .slice(-10)
+    .map((item) => `[${item.role}] ${item.text}`)
+    .join("\n");
+}
 
-    let chatData;
-    try {
-      chatData = JSON.parse(chatText);
-    } catch {
-      return res.status(500).json({
-        error: "Coze 返回的不是 JSON：" + chatText,
-      });
-    }
+function fillPromptTemplate(template, variables) {
+  return template
+    .replace(/{{\s*currentTopic\s*}}/g, variables.currentTopic || "")
+    .replace(/{{\s*userQuestion\s*}}/g, variables.userQuestion || "")
+    .replace(/{{\s*conversationHistory\s*}}/g, variables.conversationHistory || "");
+}
 
-    if (!chatResponse.ok || chatData.code !== 0) {
-      return res.status(500).json({
-        error: chatData.msg || chatData.message || JSON.stringify(chatData),
-      });
-    }
+async function callAIProvider({ currentTopic, userQuestion, conversationHistory, userId }) {
+  if (!COZE_API_TOKEN || !COZE_BOT_ID) {
+    throw new Error("缺少 COZE_API_TOKEN 或 COZE_BOT_ID。请检查环境变量。");
+  }
 
-    const conversationId = chatData.data?.conversation_id;
-    const chatId = chatData.data?.id;
+  const conversationText = formatConversationHistory(conversationHistory || []);
+  const prompt = fillPromptTemplate(SCIENCE_ANSWER_PROMPT_TEMPLATE, {
+    currentTopic,
+    userQuestion,
+    conversationHistory: conversationText,
+  });
 
-    if (!conversationId || !chatId) {
-      return res.status(500).json({
-        error:
-          "Coze 返回中没有 conversation_id 或 chat_id：" +
-          JSON.stringify(chatData),
-      });
-    }
+  const userMessage = [
+    `childId: ${userId || "unknown"}`,
+    `currentTopic: ${currentTopic || "未指定主题"}`,
+    `userQuestion: ${userQuestion || ""}`,
+    "conversationHistory:",
+    conversationText || "无",
+  ].join("\n\n");
 
-    let status = "created";
-
-    for (let i = 0; i < 30; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      const retrieveUrl = `https://api.coze.cn/v3/chat/retrieve?conversation_id=${conversationId}&chat_id=${chatId}`;
-
-      const retrieveResponse = await fetch(retrieveUrl, {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${COZE_API_TOKEN}`,
-          "Content-Type": "application/json",
+  const chatResponse = await fetch("https://api.coze.cn/v3/chat", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${COZE_API_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      bot_id: COZE_BOT_ID,
+      user_id: userId,
+      stream: false,
+      auto_save_history: true,
+      additional_messages: [
+        {
+          role: "system",
+          content: prompt,
+          content_type: "text",
         },
-      });
+        {
+          role: "user",
+          content: userMessage,
+          content_type: "text",
+        },
+      ],
+    }),
+  });
 
-      const retrieveText = await retrieveResponse.text();
-      console.log(`第 ${i + 1} 次 retrieve 返回：`, retrieveText);
+  const chatText = await chatResponse.text();
+  let chatData;
+  try {
+    chatData = JSON.parse(chatText);
+  } catch {
+    throw new Error("Coze 返回的不是 JSON：" + chatText);
+  }
 
-      let retrieveData;
-      try {
-        retrieveData = JSON.parse(retrieveText);
-      } catch {
-        return res.status(500).json({
-          error: "retrieve 返回的不是 JSON：" + retrieveText,
-        });
-      }
+  if (!chatResponse.ok || chatData.code !== 0) {
+    throw new Error(chatData.msg || chatData.message || JSON.stringify(chatData));
+  }
 
-      if (!retrieveResponse.ok || retrieveData.code !== 0) {
-        return res.status(500).json({
-          error:
-            retrieveData.msg ||
-            retrieveData.message ||
-            JSON.stringify(retrieveData),
-        });
-      }
+  const conversationId = chatData.data?.conversation_id;
+  const chatId = chatData.data?.id;
 
-      status = retrieveData.data?.status;
-      console.log("当前状态：", status);
+  if (!conversationId || !chatId) {
+    throw new Error(
+      "Coze 返回中没有 conversation_id 或 chat_id：" + JSON.stringify(chatData)
+    );
+  }
 
-      if (status === "completed") {
-        break;
-      }
-
-      if (
-        status === "failed" ||
-        status === "requires_action" ||
-        status === "canceled"
-      ) {
-        return res.status(500).json({
-          error:
-            "Coze 对话异常结束，状态：" +
-            status +
-            "；详情：" +
-            JSON.stringify(retrieveData),
-        });
-      }
-    }
-
-    if (status !== "completed") {
-      return res.status(504).json({
-        error: "Coze 回复超时，最后状态：" + status,
-      });
-    }
-
-    const messageUrl = `https://api.coze.cn/v3/chat/message/list?conversation_id=${conversationId}&chat_id=${chatId}`;
-
-    const messagesResponse = await fetch(messageUrl, {
+  let status = "created";
+  for (let i = 0; i < 30; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    const retrieveUrl = `https://api.coze.cn/v3/chat/retrieve?conversation_id=${conversationId}&chat_id=${chatId}`;
+    const retrieveResponse = await fetch(retrieveUrl, {
       method: "GET",
       headers: {
         Authorization: `Bearer ${COZE_API_TOKEN}`,
@@ -156,53 +196,225 @@ app.post("/api/chat", async (req, res) => {
       },
     });
 
-    const messagesText = await messagesResponse.text();
-    console.log("message/list 原始返回：", messagesText);
-
-    let messagesData;
+    const retrieveText = await retrieveResponse.text();
+    let retrieveData;
     try {
-      messagesData = JSON.parse(messagesText);
+      retrieveData = JSON.parse(retrieveText);
     } catch {
-      return res.status(500).json({
-        error: "message/list 返回的不是 JSON：" + messagesText,
-      });
+      throw new Error("retrieve 返回的不是 JSON：" + retrieveText);
     }
 
-    if (!messagesResponse.ok || messagesData.code !== 0) {
-      return res.status(500).json({
-        error:
-          messagesData.msg ||
-          messagesData.message ||
-          JSON.stringify(messagesData),
-      });
+    if (!retrieveResponse.ok || retrieveData.code !== 0) {
+      throw new Error(
+        retrieveData.msg || retrieveData.message || JSON.stringify(retrieveData)
+      );
     }
 
-    const messages = messagesData.data || [];
+    status = retrieveData.data?.status;
+    if (status === "completed") {
+      break;
+    }
 
-    const answerMessage = messages
-      .filter((msg) => msg.role === "assistant")
-      .filter((msg) => msg.type === "answer")
-      .pop();
+    if (status === "failed" || status === "requires_action" || status === "canceled") {
+      throw new Error(
+        "Coze 对话异常结束，状态：" + status + "；详情：" + JSON.stringify(retrieveData)
+      );
+    }
+  }
 
-    const fallbackMessage = messages
-      .filter((msg) => msg.role === "assistant")
-      .pop();
+  if (status !== "completed") {
+    throw new Error("Coze 回复超时，最后状态：" + status);
+  }
 
-    const replyText =
-      answerMessage?.content ||
-      fallbackMessage?.content ||
-      "小星刚刚没有听清楚，你可以再说一次吗？";
+  const messageUrl = `https://api.coze.cn/v3/chat/message/list?conversation_id=${conversationId}&chat_id=${chatId}`;
+  const messagesResponse = await fetch(messageUrl, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${COZE_API_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+  });
 
-    console.log("最终回复：", replyText);
+  const messagesText = await messagesResponse.text();
+  let messagesData;
+  try {
+    messagesData = JSON.parse(messagesText);
+  } catch {
+    throw new Error("message/list 返回的不是 JSON：" + messagesText);
+  }
 
-    res.json({
-      reply: replyText,
+  if (!messagesResponse.ok || messagesData.code !== 0) {
+    throw new Error(
+      messagesData.msg || messagesData.message || JSON.stringify(messagesData)
+    );
+  }
+
+  const messages = messagesData.data || [];
+  const answerMessage = messages
+    .filter((msg) => msg.role === "assistant")
+    .filter((msg) => msg.type === "answer")
+    .pop();
+  const fallbackMessage = messages
+    .filter((msg) => msg.role === "assistant")
+    .pop();
+
+  const rawReply = answerMessage?.content || fallbackMessage?.content ||
+    "小星刚刚没有听清楚，你可以再说一次吗？";
+
+  return rawReply
+    .replace(/\[(ADVANCE_TO_NEXT_TOPIC|END_ACTIVITY|ALL_TOPICS_DONE)\]/g, "")
+    .trim();
+}
+
+async function handleExperimentFlow(state, userText, userId, chatHistory = []) {
+  state = initExperimentState(state);
+  const text = normalizeText(userText);
+
+  if (state.phase === "waiting_ready") {
+    if (isReady(text)) {
+      state.phase = "waiting_name";
+      return {
+        reply: "好的！很高兴见到你！我是小星，你叫什么名字呢？",
+        nextState: state,
+      };
+    }
+    return {
+      reply: "小朋友你好！让我们一起来进行科学探索吧！你准备好开始了吗～如果你准备好了，可以和我说‘准备好了’！",
+      nextState: state,
+    };
+  }
+
+  if (state.phase === "waiting_name") {
+    if (!text) {
+      return {
+        reply: "请告诉我你的名字哦。",
+        nextState: state,
+      };
+    }
+    state.childName = parseName(text) || text;
+    state.phase = "choosing_topic";
+    return {
+      reply: `${state.childName}你好！\n\n今天让我们一起来探索一些有趣的科学小现象吧！\n\n接下来我会分别给你播放两个科学小视频哦。每看完一个视频之后，你都可以提出任何和这个主题有关的问题。\n\n一共有两个视频主题：\n\n- 主题 1：遇水开花\n- 主题 2：站立的牙签\n\n你想先选哪个主题呢？`,
+      nextState: state,
+    };
+  }
+
+  if (state.phase === "choosing_topic") {
+    const topic = chooseTopic(text);
+    if (!topic) {
+      return {
+        reply: `我还没听清你要哪个主题。${buildTopicListReply()}`,
+        nextState: state,
+      };
+    }
+    state.currentTopic = topic;
+    state.phase = "waiting_video_done";
+    state.currentTopicNoQuestionPrompted = false;
+    return {
+      reply: `太棒啦！我们先来看和「${topic}」有关的科学视频。视频播放结束后，请对我说‘视频看完了’，然后我们就可以开始讨论啦！`,
+      nextState: state,
+    };
+  }
+
+  if (state.phase === "waiting_video_done") {
+    if (isVideoDone(text)) {
+      state.phase = "qa";
+      state.currentTopicNoQuestionPrompted = false;
+      return {
+        reply: `视频是不是很有趣呀？关于这个主题，你有什么想问我的吗？你可以问任何和这个主题有关的问题哦。`,
+        nextState: state,
+      };
+    }
+    return {
+      reply: `请看完视频后告诉我“视频看完了”。这样我才能回答你的问题。`,
+      nextState: state,
+    };
+  }
+
+  if (state.phase === "qa") {
+    if (isNoQuestion(text) || isNextTopicIntent(text)) {
+      if (!state.currentTopicNoQuestionPrompted && isNoQuestion(text)) {
+        state.currentTopicNoQuestionPrompted = true;
+        return {
+          reply: "没关系，你可以提任何和刚刚的视频主题有关的问题。你还有问题吗？",
+          nextState: state,
+        };
+      }
+
+      state.completedTopics = [...new Set([...(state.completedTopics || []), state.currentTopic])];
+      const nextTopic = chooseNextTopic(state);
+      if (nextTopic) {
+        state.currentTopic = nextTopic;
+        state.currentTopicNoQuestionPrompted = false;
+        state.phase = "waiting_video_done";
+        return {
+          reply: `好的！那我们接下来看看另一个主题：「${nextTopic}」。视频播放结束后，请对我说‘视频看完了’，然后我们就可以开始讨论啦！`,
+          nextState: state,
+        };
+      }
+
+      state.phase = "finished";
+      return {
+        reply: "今天我们已经一起探索了「遇水开花」和「站立的牙签」两个主题啦！你刚才提出的问题都很有意思，谢谢你和小星一起探索科学！",
+        nextState: state,
+      };
+    }
+
+    const reply = await callAIProvider({
+      currentTopic: state.currentTopic,
+      userQuestion: userText,
+      conversationHistory: chatHistory,
+      userId,
     });
+
+    return {
+      reply,
+      nextState: state,
+    };
+  }
+
+  if (state.phase === "finished") {
+    return {
+      reply: "活动已经结束了。你已经完成了今天的科学探索。",
+      nextState: state,
+    };
+  }
+
+  state.phase = "waiting_ready";
+  return {
+    reply: "小朋友你好！让我们一起来进行科学探索吧！你准备好开始了吗～如果你准备好了，可以和我说‘准备好了’！",
+    nextState: state,
+  };
+}
+
+app.post("/api/chat", async (req, res) => {
+  try {
+    const { childId, currentTopic, userQuestion, conversationHistory, state } = req.body;
+
+    if (!childId || typeof childId !== "string") {
+      return res.status(400).json({ error: "childId 不能为空" });
+    }
+    if (!userQuestion || typeof userQuestion !== "string") {
+      return res.status(400).json({ error: "userQuestion 不能为空" });
+    }
+
+    const experimentState = initExperimentState(state || {});
+    if (typeof currentTopic === "string" && currentTopic) {
+      experimentState.currentTopic = currentTopic;
+    }
+
+    const chatHistoryArray = Array.isArray(conversationHistory) ? conversationHistory : [];
+    const result = await handleExperimentFlow(
+      experimentState,
+      userQuestion,
+      childId,
+      chatHistoryArray
+    );
+
+    res.json({ ok: true, reply: result.reply, nextState: result.nextState });
   } catch (error) {
-    console.error("Server error:", error);
-    res.status(500).json({
-      error: error.message || "服务器出错。",
-    });
+    console.error("/api/chat error:", error);
+    res.status(500).json({ error: error.message || "聊天服务出错了" });
   }
 });
 
@@ -265,6 +477,20 @@ app.post("/api/tts", async (req, res) => {
 
 app.post("/api/reset", (req, res) => {
   res.json({ ok: true });
+});
+
+// Ensure unknown /api/* routes always return JSON instead of HTML
+app.use("/api", (req, res) => {
+  res.status(404).json({
+    error: `API route not found: ${req.method} ${req.originalUrl}`,
+  });
+});
+
+app.use(express.static(publicPath));
+
+// Fallback to index.html for other routes (static HTML hosting)
+app.get("*", (req, res) => {
+  res.sendFile(path.join(publicPath, "index.html"));
 });
 
 app.listen(port, () => {

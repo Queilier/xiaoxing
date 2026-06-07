@@ -301,9 +301,19 @@
     // Initialize global experimentData from localStorage if exists
     window.experimentData = loadExperimentData() || {
       childId: null,
+      childName: null,
       startTime: null,
       endTime: null,
       condition: null,
+      experimentState: {
+        phase: "waiting_ready",
+        childName: null,
+        currentTopic: null,
+        completedTopics: [],
+        currentTopicNoQuestionPrompted: false,
+        messages: [],
+        errors: [],
+      },
       chatHistory: [],
       responses: [],
       pageEvents: [],
@@ -389,6 +399,47 @@
       chatBox.scrollTop = chatBox.scrollHeight;
     }
 
+    function sanitizeReplyText(text) {
+      return text
+        ? text.replace(/\[(ADVANCE_TO_NEXT_TOPIC|END_ACTIVITY|ALL_TOPICS_DONE)\]/g, "").trim()
+        : text;
+    }
+
+    function syncExperimentState(nextState) {
+      if (!nextState) return;
+
+      const previous = { ...window.experimentData.experimentState };
+      window.experimentData.experimentState = {
+        ...window.experimentData.experimentState,
+        ...nextState,
+      };
+
+      if (previous.phase !== window.experimentData.experimentState.phase) {
+        recordEvent("phase_change", {
+          from: previous.phase,
+          to: window.experimentData.experimentState.phase,
+          childId: window.experimentData.childId,
+        });
+      }
+      if (previous.currentTopic !== window.experimentData.experimentState.currentTopic) {
+        recordEvent("topic_change", {
+          from: previous.currentTopic,
+          to: window.experimentData.experimentState.currentTopic,
+          childId: window.experimentData.childId,
+        });
+      }
+
+      saveExperimentData();
+    }
+
+    function renderSavedHistory() {
+      const chatBox = document.getElementById("chatBox");
+      chatBox.innerHTML = "";
+      window.experimentData.chatHistory.forEach((item) => {
+        addMessage(item.role, item.text);
+      });
+    }
+
     async function startChat() {
       await unlockAudio();
 
@@ -402,12 +453,34 @@
 
       const chatBox = document.getElementById("chatBox");
 
-      if (chatBox.children.length === 0) {
-        addMessage(
-          "assistant",
-          "小朋友你好！让我们一起来进行科学探索吧！你准备好开始了吗？"
-        );
+      if (!window.experimentData.experimentState) {
+        window.experimentData.experimentState = {
+          phase: "waiting_ready",
+          childName: null,
+          currentTopic: null,
+          completedTopics: [],
+          currentTopicNoQuestionPrompted: false,
+          messages: [],
+          errors: [],
+        };
       }
+
+      if (chatBox.children.length === 0) {
+        if (window.experimentData.chatHistory.length > 0) {
+          renderSavedHistory();
+        } else {
+          const greeting =
+            "小朋友你好！让我们一起来进行科学探索吧！你准备好开始了吗～如果你准备好了，可以和我说‘准备好了’！";
+          addMessage("assistant", greeting);
+          window.experimentData.chatHistory.push({
+            role: "assistant",
+            text: greeting,
+            t: new Date().toISOString(),
+          });
+        }
+      }
+
+      syncExperimentState(window.experimentData.experimentState);
 
       // set experiment start time if not set
       if (!window.experimentData.startTime) {
@@ -640,6 +713,7 @@
       input.value = "";
 
       document.getElementById("status").innerText = "小星正在想一想……";
+      const priorChatHistory = window.experimentData.chatHistory.slice(0, -1);
 
       try {
         const chatResponse = await fetch("/api/chat", {
@@ -648,21 +722,45 @@
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            message: userText,
-            user_id: participantId,
+            childId: participantId,
+            currentTopic: window.experimentData.experimentState.currentTopic || null,
+            userQuestion: userText,
+            conversationHistory: priorChatHistory,
+            state: window.experimentData.experimentState,
           }),
         });
 
-        const chatData = await chatResponse.json();
+        let chatData;
+        try {
+          chatData = await chatResponse.json();
+        } catch (parseError) {
+          throw new Error("收到的不是 JSON 响应：" + parseError.message);
+        }
 
         if (!chatResponse.ok) {
           throw new Error(chatData.error || "AI 回复失败");
         }
 
-        const replyText = chatData.reply;
+        const replyText = sanitizeReplyText(chatData.reply || "小星暂时无法回复，请稍后再试。");
+
+        if (chatData.ok === false) {
+          window.experimentData.errors.push({
+            t: new Date().toISOString(),
+            message: chatData.error || "AI 处理失败",
+            reply: replyText,
+          });
+        }
+
+        if (chatData.nextState) {
+          syncExperimentState(chatData.nextState);
+        }
 
         // record assistant reply
-        window.experimentData.chatHistory.push({ role: "assistant", text: replyText, t: new Date().toISOString() });
+        window.experimentData.chatHistory.push({
+          role: "assistant",
+          text: replyText,
+          t: new Date().toISOString(),
+        });
         window.experimentData.responses.push({ text: replyText, t: new Date().toISOString() });
         saveExperimentData();
 
@@ -677,11 +775,17 @@
           "小星已经回复啦。你可以继续按住按钮说话。";
       } catch (error) {
         console.error(error);
+        const fallbackReply = "小星暂时无法回复，请稍后再试。";
+        addMessage("assistant", fallbackReply);
         document.getElementById("status").innerText =
           "出错了：" + error.message;
 
         // record error
-        window.experimentData.errors.push({ t: new Date().toISOString(), message: error.message });
+        window.experimentData.errors.push({
+          t: new Date().toISOString(),
+          message: error.message,
+          fallbackReply,
+        });
         saveExperimentData();
       } finally {
         isSending = false;
@@ -772,6 +876,11 @@
           sendMessage();
         }
       });
+    window.addEventListener("load", () => {
+      if (window.experimentData.chatHistory.length > 0) {
+        renderSavedHistory();
+      }
+    });
   </script>
 </body>
 </html>
