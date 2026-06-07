@@ -76,7 +76,7 @@ function isVideoDone(text = "") {
 }
 
 function isReady(text = "") {
-  return /^(准备好了|好了|开始吧|可以|好|嗯|ready|yes)$/i.test(normalizeText(text));
+  return /^(准备好了|准备好|好了|开始吧|可以|好|嗯|ready|yes)$/i.test(normalizeText(text));
 }
 
 function chooseTopic(text = "") {
@@ -117,7 +117,7 @@ function extractTopicWithCorrection(text = "") {
 
   const clean = text.toLowerCase();
 
-  const correctionMarkers = /不对|不是|说错了|换成|不要|还是|再想想|反正|其实|应该是|我要|我想选|我想看/gi;
+  const correctionMarkers = /不对|不是|说错了|换成|不要|还是|再想想|反正|其实|应该是/gi;
 
   const topic1Keywords = /主题\s*1|主题一|第一个|第1个|我选第一个|遇水开花|开花|花|纸花|水里的花/gi;
   const topic2Keywords = /主题\s*2|主题二|第二个|第2个|我选第二个|站立的牙签|牙签|站起来|站立/gi;
