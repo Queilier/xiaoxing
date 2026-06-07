@@ -392,7 +392,7 @@ async function handleExperimentFlow(state, userText, userId, chatHistory = []) {
     // FIX #7: always init to false for a freshly chosen topic
     state.noQuestionFollowUpUsed[topic] = false;
     return {
-      reply: `太棒啦！我们先来看和「${correctedTopic}」有关的科学视频。视频播放结束后，请对我说'视频看完了'，然后我们就可以开始讨论啦！`,
+      reply: `太棒啦！我们先来看和「${topic}」有关的科学视频。视频播放结束后，请对我说'视频看完了'，然后我们就可以开始讨论啦！`,
       nextState: state,
     };
   }
