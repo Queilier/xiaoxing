@@ -84,8 +84,8 @@ function chooseTopic(text = "") {
   if (/(主题\s*1|主题一|第一个|第1个|我选第一个|遇水开花|开花|花|纸花|水里的花)/i.test(clean)) {
     return "遇水开花";
   }
-  if (/(主题\s*2|主题二|第二个|第2个|我选第二个|站立的牙签|牙签|站起来|站立)/i.test(clean)) {
-    return "站立的牙签";
+  if (/(主题\s*2|主题二|第二个|第2个|我选第二个|牙签五角星|牙签|五角星|星)/i.test(clean)) {
+    return "牙签五角星";
   }
   for (const topic of TOPICS) {
     if (clean.includes(topic)) return topic;
@@ -120,7 +120,7 @@ function extractTopicWithCorrection(text = "") {
   const correctionMarkers = /不对|不是|说错了|换成|不要|还是|再想想|反正|其实|应该是/gi;
 
   const topic1Keywords = /主题\s*1|主题一|第一个|第1个|我选第一个|遇水开花|开花|花|纸花|水里的花/gi;
-  const topic2Keywords = /主题\s*2|主题二|第二个|第2个|我选第二个|站立的牙签|牙签|站起来|站立/gi;
+  const topic2Keywords = /主题\s*2|主题二|第二个|第2个|我选第二个|牙签五角星|牙签|五角星|星/gi;
 
   const mentions = [];
 
@@ -152,7 +152,7 @@ function extractTopicWithCorrection(text = "") {
 }
 
 function buildTopicListReply() {
-  return `今天让我们一起来探索一些有趣的科学小现象吧！\n\n接下来我会分别给你播放两个科学小视频哦。每看完一个视频之后，你都可以提出任何和这个主题有关的问题。\n\n一共有两个视频主题：\n\n- 主题 1：遇水开花\n- 主题 2：站立的牙签\n\n你想先选哪个主题呢？`;
+  return `今天让我们一起来探索一些有趣的科学小现象吧！\n\n接下来我会分别给你播放两个科学小视频哦。每看完一个视频之后，你都可以提出任何和这个主题有关的问题。\n\n一共有两个视频主题：\n\n- 主题 1：遇水开花\n- 主题 2：牙签五角星\n\n你想先选哪个主题呢？`;
 }
 
 function formatConversationHistory(messages = []) {
@@ -359,7 +359,7 @@ async function handleExperimentFlow(state, userText, userId, chatHistory = []) {
       reply:
         `${state.childName}你好！\n\n今天让我们一起来探索一些有趣的科学小现象吧！\n\n` +
         `接下来我会分别给你播放两个科学小视频哦。每看完一个视频之后，你都可以提出任何和这个主题有关的问题。\n\n` +
-        `一共有两个视频主题：\n\n- 主题 1：遇水开花\n- 主题 2：站立的牙签\n\n你想先选哪个主题呢？`,
+        `一共有两个视频主题：\n\n- 主题 1：遇水开花\n- 主题 2：牙签五角星\n\n你想先选哪个主题呢？`,
       nextState: state,
     };
   }
