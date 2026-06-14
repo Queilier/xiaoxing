@@ -21,7 +21,7 @@ const COZE_BOT_ID = process.env.COZE_BOT_ID;
 const COZE_USER_ID = process.env.COZE_USER_ID || "child_001";
 const COZE_VOICE_ID = process.env.COZE_VOICE_ID || "7620288417930297386";
 
-const TOPICS = ["遇水开花", "站立的牙签"];
+const TOPICS = ["遇水开花", "牙签五角星"];
 const SCIENCE_ANSWER_PROMPT_TEMPLATE = await fs.readFile(
   path.join(promptsPath, "science-answer-prompt.md"),
   "utf-8"
@@ -129,7 +129,7 @@ function extractTopicWithCorrection(text = "") {
     mentions.push({ pos: match.index, len: match[0].length, topic: "遇水开花" });
   }
   while ((match = topic2Keywords.exec(clean)) !== null) {
-    mentions.push({ pos: match.index, len: match[0].length, topic: "站立的牙签" });
+    mentions.push({ pos: match.index, len: match[0].length, topic: "牙签五角星" });
   }
 
   const corrections = [];

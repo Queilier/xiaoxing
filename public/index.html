@@ -216,7 +216,7 @@
           <input
             id="participantId"
             class="participant-input"
-            placeholder="请输入被试编号，例如 child_001"
+            placeholder="请输入被试编号，例如 001"
           />
         </div>
 
@@ -356,6 +356,8 @@
     let isSending = false;
     let audioUnlocked = false;
     let currentAudio = null;
+    let isRecognitionRunning = false;
+    let voiceMessageHandled = false;
 
     function getSpeechRecognition() {
       return window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -364,6 +366,15 @@
     // Get participant id from input. If `save` is true, persist to experimentData.
     function getParticipantId(save = false) {
       const input = document.getElementById("participantId");
+
+      if (!input) {
+        console.warn("没有找到 participantId 输入框");
+        return "test_user";
+      }
+
+      // iPad/Safari 上点击按钮时键盘可能还没收起，先 blur 一下更稳
+      input.blur();
+
       const value = input.value.trim();
 
       if (value) {
@@ -444,14 +455,19 @@
     }
 
     async function startChat() {
-      await unlockAudio();
-
       const participantId = getParticipantId(false);
 
-      if (participantId === "test_user") {
+      if (!participantId || participantId === "test_user") {
         document.getElementById("status").innerText =
-          "请先输入被试编号，例如 child_001。";
+          "请先输入被试编号，例如 001。";
         return;
+      }
+
+      // 音频解锁放在编号验证之后，并且不能阻塞实验开始
+      try {
+        await unlockAudio();
+      } catch (error) {
+        console.warn("音频解锁失败，但继续开始探索：", error);
       }
 
       const chatBox = document.getElementById("chatBox");
@@ -505,6 +521,25 @@
         "当前被试编号：" + participantId + "。现在可以开始和小星聊天啦。";
     }
 
+
+    function finishVoiceInput() {
+      if (voiceMessageHandled) return;
+      voiceMessageHandled = true;
+
+      const text = document.getElementById("userInput").value.trim();
+
+      resetHoldButton();
+
+      if (text) {
+        document.getElementById("status").innerText =
+          "我听到的是：“" + text + "”。正在发送给小星……";
+        sendMessage("voice");
+      } else {
+        document.getElementById("status").innerText =
+          "刚刚没有听到内容，可以再按住说一次，或者直接打字。";
+      }
+    }
+
     function startHoldVoiceInput(event) {
       if (event) {
         event.preventDefault();
@@ -514,7 +549,7 @@
 
       if (participantId === "test_user") {
         document.getElementById("status").innerText =
-          "请先输入被试编号，例如 child_001。";
+          "请先输入被试编号，例如 001。";
         return;
       }
 
@@ -528,13 +563,17 @@
 
       if (!SpeechRecognition) {
         document.getElementById("status").innerText =
-          "这个浏览器暂时不支持语音输入，请换 Chrome 浏览器，或者直接打字。";
+          "这个浏览器暂时不支持语音输入，可以直接打字。";
         return;
       }
 
-      if (isHoldingToTalk) return;
+      if (isHoldingToTalk || isRecognitionRunning) {
+        return;
+      }
 
       isHoldingToTalk = true;
+      isRecognitionRunning = false;
+      voiceMessageHandled = false;
       finalTranscript = "";
 
       const input = document.getElementById("userInput");
@@ -547,7 +586,9 @@
       recognition = new SpeechRecognition();
       recognition.lang = "zh-CN";
       recognition.interimResults = true;
-      recognition.continuous = true;
+
+      // iPad/Safari 对 continuous=true 更容易报 not-allowed / service-not-allowed
+      recognition.continuous = false;
 
       document.getElementById("status").innerText = "小星正在听你说话……";
 
@@ -569,52 +610,52 @@
       };
 
       recognition.onerror = function (event) {
-        console.error("语音识别错误：", event.error);
+        console.error("语音识别错误：", event.error, event.message);
 
+        isRecognitionRunning = false;
         isHoldingToTalk = false;
+        voiceMessageHandled = true;
         resetHoldButton();
 
-        if (event.error === "not-allowed") {
+        if (event.error === "not-allowed" || event.error === "service-not-allowed") {
           document.getElementById("status").innerText =
-            "浏览器没有麦克风权限，请允许麦克风后再试。";
+            "iPad 或浏览器暂时不允许继续使用语音。请检查麦克风权限，刷新页面后再试，也可以直接打字。";
+        } else if (event.error === "no-speech") {
+          document.getElementById("status").innerText =
+            "刚刚没有听到声音，可以再按住说一次，或者直接打字。";
         } else {
           document.getElementById("status").innerText =
-            "刚刚没有听清楚，可以再按住说一次，或者直接打字。";
+            "语音识别暂时出错了，可以再按住说一次，或者直接打字。";
         }
       };
 
       recognition.onend = function () {
+        isRecognitionRunning = false;
+
+        // 如果儿童还按着按钮，等他松手时再发送，避免 iPad 自动结束后重复发送
         if (isHoldingToTalk) {
+          document.getElementById("status").innerText =
+            "语音输入已结束，可以松开按钮发送。";
           return;
         }
 
-        const text = document.getElementById("userInput").value.trim();
-
-        resetHoldButton();
-
-        if (text) {
-          document.getElementById("status").innerText =
-            "我听到的是：“" + text + "”。正在发送给小星……";
-          // record transcribed user message
-          window.experimentData.chatHistory.push({ role: "user", text, t: new Date().toISOString(), via: "voice" });
-          saveExperimentData();
-          sendMessage();
-        } else {
-          document.getElementById("status").innerText =
-            "刚刚没有听到内容，可以再按住说一次。";
-        }
+        finishVoiceInput();
       };
 
       try {
         recognition.start();
+        isRecognitionRunning = true;
+        recordEvent("voice_start", { childId: participantId });
       } catch (error) {
         console.error("启动语音识别失败：", error);
 
+        isRecognitionRunning = false;
         isHoldingToTalk = false;
+        voiceMessageHandled = true;
         resetHoldButton();
 
         document.getElementById("status").innerText =
-          "语音输入启动失败，可以再试一次。";
+          "语音输入启动失败，可以再试一次，或者直接打字。";
       }
     }
 
@@ -623,16 +664,25 @@
         event.preventDefault();
       }
 
-      if (!isHoldingToTalk) return;
+      if (!isHoldingToTalk && !isRecognitionRunning) return;
 
       isHoldingToTalk = false;
 
       document.getElementById("status").innerText =
         "语音输入结束，正在整理你说的话……";
 
-      if (recognition) {
-        recognition.stop();
+      if (recognition && isRecognitionRunning) {
+        try {
+          recognition.stop();
+        } catch (error) {
+          console.warn("停止语音识别失败，直接整理已识别内容：", error);
+          isRecognitionRunning = false;
+          finishVoiceInput();
+        }
+      } else {
+        finishVoiceInput();
       }
+
       recordEvent("voice_end", { childId: getParticipantId() });
     }
 
@@ -641,16 +691,23 @@
         event.preventDefault();
       }
 
-      if (!isHoldingToTalk) return;
+      if (!isHoldingToTalk && !isRecognitionRunning) return;
 
       isHoldingToTalk = false;
+      voiceMessageHandled = true;
 
-      if (recognition) {
-        recognition.stop();
+      if (recognition && isRecognitionRunning) {
+        try {
+          recognition.abort();
+        } catch (error) {
+          console.warn("取消语音识别失败：", error);
+        }
       }
 
+      isRecognitionRunning = false;
       resetHoldButton();
 
+      document.getElementById("userInput").value = "";
       document.getElementById("status").innerText =
         "已经取消这次语音输入，可以重新按住说话。";
 
@@ -696,14 +753,14 @@
       recordEvent("tts_play", { text: text, childId: getParticipantId() });
     }
 
-    async function sendMessage() {
+    async function sendMessage(via = "text") {
       if (isSending) return;
 
       const participantId = getParticipantId();
 
       if (participantId === "test_user") {
         document.getElementById("status").innerText =
-          "请先输入被试编号，例如 child_001。";
+          "请先输入被试编号，例如 001。";
         return;
       }
 
@@ -715,7 +772,7 @@
       isSending = true;
 
       // record user message
-      window.experimentData.chatHistory.push({ role: "user", text: userText, t: new Date().toISOString(), via: "text" });
+      window.experimentData.chatHistory.push({ role: "user", text: userText, t: new Date().toISOString(), via });
       saveExperimentData();
 
       addMessage("user", userText);
@@ -775,13 +832,25 @@
 
         addMessage("assistant", replyText);
 
-        document.getElementById("status").innerText =
-          "小星正在说话……";
+        try {
+          document.getElementById("status").innerText =
+            "小星正在说话……";
 
-        await playTTS(replyText);
+          await playTTS(replyText);
 
-        document.getElementById("status").innerText =
-          "小星已经回复啦。你可以继续按住按钮说话。";
+          document.getElementById("status").innerText =
+            "小星已经回复啦。你可以继续按住按钮说话。";
+        } catch (ttsError) {
+          console.error("TTS 播放失败：", ttsError);
+          window.experimentData.errors.push({
+            t: new Date().toISOString(),
+            message: "TTS 播放失败：" + ttsError.message,
+          });
+          saveExperimentData();
+
+          document.getElementById("status").innerText =
+            "小星已经回复啦，但语音播放暂时失败。你可以继续按住按钮说话，或者直接打字。";
+        }
       } catch (error) {
         console.error(error);
         const fallbackReply = "小星暂时无法回复，请稍后再试。";
@@ -818,13 +887,21 @@
         document.getElementById("status").innerText =
           "已经重新开始。请重新确认被试编号，然后点击“开始探索”。";
 
-        if (recognition) recognition.stop();
+        if (recognition) {
+          try {
+            recognition.abort();
+          } catch (error) {
+            console.warn("重置时取消语音识别失败：", error);
+          }
+        }
         if (currentAudio) {
           currentAudio.pause();
           currentAudio.currentTime = 0;
         }
 
         isHoldingToTalk = false;
+        isRecognitionRunning = false;
+        voiceMessageHandled = false;
         isSending = false;
         finalTranscript = "";
         audioUnlocked = false;
