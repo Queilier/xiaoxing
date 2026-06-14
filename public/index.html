@@ -356,6 +356,7 @@
     let isSending = false;
     let audioUnlocked = false;
     let currentAudio = null;
+    let globalTTSAudio = null;
     let isRecognitionRunning = false;
     let voiceMessageHandled = false;
 
@@ -391,13 +392,30 @@
 
     async function unlockAudio() {
       try {
-        const audio = new Audio(
-          "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQQAAAAAAA=="
-        );
-        await audio.play();
+        if (!globalTTSAudio) {
+          globalTTSAudio = document.createElement("audio");
+          globalTTSAudio.setAttribute("playsinline", "true");
+          globalTTSAudio.preload = "auto";
+          document.body.appendChild(globalTTSAudio);
+        }
+
+        globalTTSAudio.src =
+          "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQQAAAAAAA==";
+        globalTTSAudio.muted = true;
+        globalTTSAudio.volume = 0;
+
+        await globalTTSAudio.play();
+
+        globalTTSAudio.pause();
+        globalTTSAudio.currentTime = 0;
+        globalTTSAudio.muted = false;
+        globalTTSAudio.volume = 1;
+
         audioUnlocked = true;
+        console.log("音频已解锁");
       } catch (error) {
-        console.log("声音激活失败：", error);
+        audioUnlocked = false;
+        console.warn("声音激活失败：", error);
       }
     }
 
@@ -721,11 +739,6 @@
     }
 
     async function playTTS(text) {
-      if (currentAudio) {
-        currentAudio.pause();
-        currentAudio.currentTime = 0;
-      }
-
       const ttsResponse = await fetch("/api/tts", {
         method: "POST",
         headers: {
@@ -748,9 +761,30 @@
       const audioBlob = await ttsResponse.blob();
       const audioUrl = URL.createObjectURL(audioBlob);
 
-      currentAudio = new Audio(audioUrl);
-      await currentAudio.play();
-      recordEvent("tts_play", { text: text, childId: getParticipantId() });
+      if (!globalTTSAudio) {
+        globalTTSAudio = document.createElement("audio");
+        globalTTSAudio.setAttribute("playsinline", "true");
+        globalTTSAudio.preload = "auto";
+        document.body.appendChild(globalTTSAudio);
+      }
+
+      try {
+        globalTTSAudio.pause();
+        globalTTSAudio.currentTime = 0;
+      } catch {}
+
+      globalTTSAudio.src = audioUrl;
+      globalTTSAudio.muted = false;
+      globalTTSAudio.volume = 1;
+
+      try {
+        await globalTTSAudio.play();
+        recordEvent("tts_play", { text: text, childId: getParticipantId() });
+      } finally {
+        setTimeout(() => {
+          URL.revokeObjectURL(audioUrl);
+        }, 30000);
+      }
     }
 
     async function sendMessage(via = "text") {
