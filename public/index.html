@@ -367,8 +367,14 @@
     let isHoldingToTalk = false;
     let isRecognitionRunning = false;
     let finalTranscript = "";
+    let interimTranscriptBuffer = "";
     let voiceMessageHandled = false;
     let lastVoiceError = null;
+    let voiceStopTimer = null;
+    let voiceFinishFallbackTimer = null;
+    let voiceHeardAudio = false;
+    let voiceHeardSpeech = false;
+    let voiceResultCount = 0;
     let isSending = false;
     let audioUnlocked = false;
     let currentAudio = null;
@@ -594,22 +600,67 @@
     }
 
 
+    function clearVoiceTimers() {
+      if (voiceStopTimer) {
+        clearTimeout(voiceStopTimer);
+        voiceStopTimer = null;
+      }
+      if (voiceFinishFallbackTimer) {
+        clearTimeout(voiceFinishFallbackTimer);
+        voiceFinishFallbackTimer = null;
+      }
+    }
+
+    function getBestVoiceTranscript() {
+      const input = document.getElementById("userInput");
+      const inputText = input ? input.value.trim() : "";
+      const bufferedText = (finalTranscript + interimTranscriptBuffer).trim();
+      const bestText = inputText || bufferedText;
+
+      // iPad Chrome 有时只返回 interim，不返回 final；这里把 interim 也作为兜底文本。
+      if (bestText && input && !inputText) {
+        input.value = bestText;
+      }
+
+      return bestText;
+    }
+
     function finishVoiceInput() {
       if (voiceMessageHandled) return;
       voiceMessageHandled = true;
+      clearVoiceTimers();
 
-      const text = document.getElementById("userInput").value.trim();
+      const text = getBestVoiceTranscript();
 
       resetHoldButton();
 
       if (text) {
+        recordEvent("voice_transcript_ready", {
+          childId: getParticipantId(),
+          text,
+          heardAudio: voiceHeardAudio,
+          heardSpeech: voiceHeardSpeech,
+          resultCount: voiceResultCount,
+          usedInterimFallback: !finalTranscript.trim() && Boolean(interimTranscriptBuffer.trim()),
+        });
         document.getElementById("status").innerText =
           "我听到的是：“" + text + "”。正在发送给小星……";
         sendMessage("voice");
       } else {
-        const message = lastVoiceError === "no-speech"
-          ? "刚刚没有听清内容，可以再按住说一次，或者直接打字。"
-          : "刚刚没有听到内容，可以再按住说一次，或者直接打字。";
+        recordEvent("voice_no_transcript", {
+          childId: getParticipantId(),
+          lastVoiceError,
+          heardAudio: voiceHeardAudio,
+          heardSpeech: voiceHeardSpeech,
+          resultCount: voiceResultCount,
+        });
+
+        let message = "刚刚没有转成文字，可以再按住说一次，或者直接打字。";
+        if (lastVoiceError === "no-speech") {
+          message = "刚刚没有听清内容，可以离 iPad 近一点、说慢一点，再按住说一次。";
+        } else if (voiceHeardAudio || voiceHeardSpeech) {
+          message = "刚刚好像听到了声音，但没有成功转成文字。可以说慢一点、离 iPad 近一点，再试一次。";
+        }
         document.getElementById("status").innerText = message;
       }
     }
@@ -668,11 +719,16 @@
         return;
       }
 
+      clearVoiceTimers();
       isHoldingToTalk = true;
       isRecognitionRunning = false;
       voiceMessageHandled = false;
       lastVoiceError = null;
       finalTranscript = "";
+      interimTranscriptBuffer = "";
+      voiceHeardAudio = false;
+      voiceHeardSpeech = false;
+      voiceResultCount = 0;
 
       const input = document.getElementById("userInput");
       input.value = "";
@@ -690,6 +746,29 @@
 
       document.getElementById("status").innerText = "小星正在听你说话……";
 
+      recognition.onaudiostart = function () {
+        voiceHeardAudio = true;
+        recordEvent("voice_audio_start", { childId: getParticipantId() });
+      };
+
+      recognition.onsoundstart = function () {
+        voiceHeardAudio = true;
+        recordEvent("voice_sound_start", { childId: getParticipantId() });
+      };
+
+      recognition.onspeechstart = function () {
+        voiceHeardSpeech = true;
+        document.getElementById("status").innerText = "我听到声音了，请说完后松开按钮。";
+        recordEvent("voice_speech_start", { childId: getParticipantId() });
+      };
+
+      recognition.onspeechend = function () {
+        recordEvent("voice_speech_end", { childId: getParticipantId() });
+        if (isHoldingToTalk) {
+          document.getElementById("status").innerText = "我听到你说完了，可以松开按钮发送。";
+        }
+      };
+
       recognition.onresult = function (event) {
         let interimTranscript = "";
 
@@ -703,8 +782,15 @@
           }
         }
 
-        const currentText = finalTranscript + interimTranscript;
+        interimTranscriptBuffer = interimTranscript;
+        voiceResultCount += 1;
+
+        const currentText = finalTranscript + interimTranscriptBuffer;
         document.getElementById("userInput").value = currentText;
+
+        if (currentText.trim()) {
+          document.getElementById("status").innerText = "正在识别：“" + currentText.trim() + "”";
+        }
       };
 
       recognition.onerror = function (event) {
@@ -737,6 +823,7 @@
 
       recognition.onend = function () {
         isRecognitionRunning = false;
+        clearVoiceTimers();
 
         // 如果儿童还按着按钮，等他松手时再发送，避免 iPad 自动结束后重复发送
         if (isHoldingToTalk) {
@@ -778,24 +865,43 @@
 
       if (!isHoldingToTalk && !isRecognitionRunning) return;
 
+      clearVoiceTimers();
       isHoldingToTalk = false;
 
       document.getElementById("status").innerText =
         "语音输入结束，正在整理你说的话……";
 
       if (recognition && isRecognitionRunning) {
-        try {
-          recognition.stop();
-        } catch (error) {
-          console.warn("停止语音识别失败，直接整理已识别内容：", error);
-          isRecognitionRunning = false;
-          finishVoiceInput();
-        }
+        // iPad Chrome 有时松手后还需要一点时间把声音整理成文字；
+        // 这里延迟 stop，并设置兜底 finish，避免一直卡住。
+        clearVoiceTimers();
+        voiceStopTimer = setTimeout(() => {
+          try {
+            recognition.stop();
+          } catch (error) {
+            console.warn("停止语音识别失败，直接整理已识别内容：", error);
+            isRecognitionRunning = false;
+            finishVoiceInput();
+          }
+        }, 500);
+
+        voiceFinishFallbackTimer = setTimeout(() => {
+          if (!voiceMessageHandled) {
+            console.warn("语音识别 onend 未及时触发，使用兜底整理内容");
+            isRecognitionRunning = false;
+            finishVoiceInput();
+          }
+        }, 2600);
       } else {
         finishVoiceInput();
       }
 
-      recordEvent("voice_end", { childId: getParticipantId() });
+      recordEvent("voice_end", {
+        childId: getParticipantId(),
+        heardAudio: voiceHeardAudio,
+        heardSpeech: voiceHeardSpeech,
+        resultCount: voiceResultCount,
+      });
     }
 
     function cancelHoldVoiceInput(event) {
@@ -1219,7 +1325,12 @@
         voiceMessageHandled = false;
         isSending = false;
         finalTranscript = "";
+        interimTranscriptBuffer = "";
         lastVoiceError = null;
+        voiceHeardAudio = false;
+        voiceHeardSpeech = false;
+        voiceResultCount = 0;
+        clearVoiceTimers();
         audioUnlocked = false;
         isTTSPlaying = false;
         lastTTSReplayText = "";
