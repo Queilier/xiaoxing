@@ -220,7 +220,7 @@
           />
         </div>
 
-        <button class="primary" onclick="startChat()">开始探索</button>
+        <button id="startChatBtn" class="primary" onclick="startChat()">开始探索</button>
         <button onclick="resetChat()">重新开始</button>
       </div>
 
@@ -310,7 +310,7 @@
         childName: null,
         currentTopic: null,
         completedTopics: [],
-        currentTopicNoQuestionPrompted: false,
+        noQuestionFollowUpUsed: {},
         messages: [],
         errors: [],
       },
@@ -352,13 +352,12 @@
 
     let recognition = null;
     let isHoldingToTalk = false;
+    let isRecognitionRunning = false;
     let finalTranscript = "";
     let isSending = false;
     let audioUnlocked = false;
     let currentAudio = null;
     let globalTTSAudio = null;
-    let isRecognitionRunning = false;
-    let voiceMessageHandled = false;
 
     function getSpeechRecognition() {
       return window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -390,33 +389,90 @@
       return "test_user";
     }
 
-    async function unlockAudio() {
-      try {
-        if (!globalTTSAudio) {
-          globalTTSAudio = document.createElement("audio");
-          globalTTSAudio.setAttribute("playsinline", "true");
-          globalTTSAudio.preload = "auto";
-          document.body.appendChild(globalTTSAudio);
-        }
+    function createInitialExperimentState() {
+      return {
+        phase: "waiting_ready",
+        childName: null,
+        currentTopic: null,
+        completedTopics: [],
+        noQuestionFollowUpUsed: {},
+        messages: [],
+        errors: [],
+      };
+    }
 
-        globalTTSAudio.src =
-          "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQQAAAAAAA==";
-        globalTTSAudio.muted = true;
-        globalTTSAudio.volume = 0;
+    function ensureExperimentDataShape() {
+      window.experimentData = window.experimentData || {};
+      window.experimentData.chatHistory = Array.isArray(window.experimentData.chatHistory)
+        ? window.experimentData.chatHistory
+        : [];
+      window.experimentData.responses = Array.isArray(window.experimentData.responses)
+        ? window.experimentData.responses
+        : [];
+      window.experimentData.pageEvents = Array.isArray(window.experimentData.pageEvents)
+        ? window.experimentData.pageEvents
+        : [];
+      window.experimentData.errors = Array.isArray(window.experimentData.errors)
+        ? window.experimentData.errors
+        : [];
 
-        await globalTTSAudio.play();
-
-        globalTTSAudio.pause();
-        globalTTSAudio.currentTime = 0;
-        globalTTSAudio.muted = false;
-        globalTTSAudio.volume = 1;
-
-        audioUnlocked = true;
-        console.log("音频已解锁");
-      } catch (error) {
-        audioUnlocked = false;
-        console.warn("声音激活失败：", error);
+      if (!window.experimentData.experimentState) {
+        window.experimentData.experimentState = createInitialExperimentState();
       }
+
+      if (!window.experimentData.experimentState.noQuestionFollowUpUsed) {
+        window.experimentData.experimentState.noQuestionFollowUpUsed = {};
+      }
+      if (!Array.isArray(window.experimentData.experimentState.completedTopics)) {
+        window.experimentData.experimentState.completedTopics = [];
+      }
+    }
+
+    function ensureParticipantSession(participantId) {
+      ensureExperimentDataShape();
+
+      const previousChild = window.experimentData.childId || null;
+      if (previousChild && previousChild !== participantId) {
+        clearExperimentSession(true);
+        ensureExperimentDataShape();
+        recordEvent("session_closed", { previousChildId: previousChild });
+      }
+
+      window.experimentData.childId = participantId;
+      if (!window.experimentData.startTime) {
+        window.experimentData.startTime = new Date().toISOString();
+      }
+      saveExperimentData();
+    }
+
+    async function unlockAudio() {
+  try {
+    if (!globalTTSAudio) {
+      globalTTSAudio = document.createElement("audio");
+      globalTTSAudio.setAttribute("playsinline", "true");
+      globalTTSAudio.preload = "auto";
+      document.body.appendChild(globalTTSAudio);
+    }
+
+    // 用一个很短的静音音频，在“开始探索”的点击手势里解锁 audio
+    globalTTSAudio.src =
+      "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQQAAAAAAA==";
+    globalTTSAudio.muted = true;
+    globalTTSAudio.volume = 0;
+
+    await globalTTSAudio.play();
+
+    globalTTSAudio.pause();
+    globalTTSAudio.currentTime = 0;
+    globalTTSAudio.muted = false;
+    globalTTSAudio.volume = 1;
+
+    audioUnlocked = true;
+    console.log("音频已解锁");
+  } catch (error) {
+    audioUnlocked = false;
+    console.warn("声音激活失败：", error);
+  }
     }
 
     function addMessage(role, text) {
@@ -490,30 +546,8 @@
 
       const chatBox = document.getElementById("chatBox");
 
-      if (!window.experimentData.experimentState) {
-        window.experimentData.experimentState = {
-          phase: "waiting_ready",
-          childName: null,
-          currentTopic: null,
-          completedTopics: [],
-          currentTopicNoQuestionPrompted: false,
-          messages: [],
-          errors: [],
-        };
-      }
-      // If a different childId is being started, clear previous session data.
-      const previousChild = window.experimentData.childId || null;
-      if (previousChild && previousChild !== participantId) {
-        // clear previous session but keep pageEvents (for export)
-        clearExperimentSession();
-        recordEvent("session_closed", { previousChildId: previousChild });
-      }
-
-      // persist new childId and initialize start time when starting
-      window.experimentData.childId = participantId;
-      if (!window.experimentData.startTime) {
-        window.experimentData.startTime = new Date().toISOString();
-      }
+      // 移动端有时“开始探索”的点击/触摸事件不稳定；这里统一兜底初始化被试会话。
+      ensureParticipantSession(participantId);
 
       if (chatBox.children.length === 0) {
         if (window.experimentData.chatHistory.length > 0) {
@@ -748,7 +782,7 @@
           text: text,
         }),
       });
-
+      
       if (!ttsResponse.ok) {
         let errMsg = "TTS 语音生成失败";
         try {
@@ -757,26 +791,26 @@
         } catch {}
         throw new Error(errMsg);
       }
-
+      
       const audioBlob = await ttsResponse.blob();
       const audioUrl = URL.createObjectURL(audioBlob);
-
+      
       if (!globalTTSAudio) {
         globalTTSAudio = document.createElement("audio");
         globalTTSAudio.setAttribute("playsinline", "true");
         globalTTSAudio.preload = "auto";
         document.body.appendChild(globalTTSAudio);
       }
-
+      
       try {
         globalTTSAudio.pause();
         globalTTSAudio.currentTime = 0;
       } catch {}
-
+      
       globalTTSAudio.src = audioUrl;
       globalTTSAudio.muted = false;
       globalTTSAudio.volume = 1;
-
+      
       try {
         await globalTTSAudio.play();
         recordEvent("tts_play", { text: text, childId: getParticipantId() });
@@ -787,16 +821,20 @@
       }
     }
 
+
     async function sendMessage(via = "text") {
       if (isSending) return;
 
-      const participantId = getParticipantId();
+      const participantId = getParticipantId(false);
 
-      if (participantId === "test_user") {
+      if (!participantId || participantId === "test_user") {
         document.getElementById("status").innerText =
           "请先输入被试编号，例如 001。";
         return;
       }
+
+      // 即使平板/手机没有成功点击“开始探索”，发送第一句话时也会绑定 ID 并初始化状态。
+      ensureParticipantSession(participantId);
 
       const input = document.getElementById("userInput");
       const userText = input.value.trim();
@@ -964,7 +1002,7 @@
             childName: null,
             currentTopic: null,
             completedTopics: [],
-            currentTopicNoQuestionPrompted: false,
+            noQuestionFollowUpUsed: {},
             messages: [],
             errors: [],
           },
@@ -978,6 +1016,25 @@
       } catch (e) {
         console.error("clearExperimentSession failed:", e);
       }
+    }
+
+    const startChatBtn = document.getElementById("startChatBtn");
+    if (startChatBtn) {
+      let lastStartTouchAt = 0;
+
+      startChatBtn.addEventListener("touchend", (e) => {
+        e.preventDefault();
+        lastStartTouchAt = Date.now();
+        startChat();
+      }, { passive: false });
+
+      startChatBtn.addEventListener("click", (e) => {
+        // 某些移动端 touchend 后还会补一个 click，避免 startChat 连续跑两次。
+        if (Date.now() - lastStartTouchAt < 700) {
+          e.preventDefault();
+          return;
+        }
+      });
     }
 
     // Record input changes for participantId and userInput
