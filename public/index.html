@@ -170,6 +170,20 @@
       text-align: center;
     }
 
+
+    .tts-replay-area {
+      margin-top: 10px;
+      text-align: center;
+      min-height: 0;
+    }
+
+    .tts-replay-button {
+      font-size: 16px;
+      padding: 10px 18px;
+      background: #fff3cd;
+      border-radius: 999px;
+    }
+
     @media (max-width: 700px) {
       h1 {
         font-size: 32px;
@@ -247,6 +261,7 @@
       <div id="status" class="status">
         请先输入被试编号，然后点击“开始探索”。
       </div>
+      <div id="ttsReplayArea" class="tts-replay-area"></div>
     </div>
   </div>
 
@@ -358,6 +373,8 @@
     let audioUnlocked = false;
     let currentAudio = null;
     let globalTTSAudio = null;
+    let isTTSPlaying = false;
+    let lastTTSReplayText = "";
 
     function getSpeechRecognition() {
       return window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -450,6 +467,7 @@
     if (!globalTTSAudio) {
       globalTTSAudio = document.createElement("audio");
       globalTTSAudio.setAttribute("playsinline", "true");
+      globalTTSAudio.setAttribute("webkit-playsinline", "true");
       globalTTSAudio.preload = "auto";
       document.body.appendChild(globalTTSAudio);
     }
@@ -617,6 +635,18 @@
 
       // 即使移动端“开始探索”没有成功点击，第一次按住说话时也补上被试状态。
       ensureParticipantSession(participantId);
+
+      if (!audioUnlocked) {
+        unlockAudio().catch((error) => {
+          console.warn("语音输入前解锁音频失败：", error);
+        });
+      }
+
+      if (isTTSPlaying) {
+        document.getElementById("status").innerText =
+          "小星正在说话，请等小星说完再按住说话。";
+        return;
+      }
 
       if (isSending) {
         document.getElementById("status").innerText =
@@ -799,7 +829,97 @@
       button.classList.remove("recording");
     }
 
-    async function playTTS(text) {
+    function removeTTSReplayButton() {
+      const area = document.getElementById("ttsReplayArea");
+      if (area) area.innerHTML = "";
+    }
+
+    function showTTSReplayButton(text, reason = "") {
+      const area = document.getElementById("ttsReplayArea");
+      if (!area || !text) return;
+
+      lastTTSReplayText = text;
+      area.innerHTML = "";
+
+      const hint = document.createElement("div");
+      hint.style.color = "#607d8b";
+      hint.style.fontSize = "14px";
+      hint.style.marginBottom = "6px";
+      hint.innerText = reason || "如果刚刚没有听到小星的声音，可以点下面按钮再播放一次。";
+
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "tts-replay-button";
+      btn.innerText = "点这里播放小星语音";
+      btn.onclick = async function () {
+        try {
+          btn.disabled = true;
+          btn.innerText = "正在播放……";
+          document.getElementById("status").innerText = "小星正在说话……";
+          await unlockAudio();
+          await playTTS(lastTTSReplayText, { manual: true });
+          document.getElementById("status").innerText =
+            "小星已经回复啦。你可以继续按住按钮说话。";
+          btn.disabled = false;
+          btn.innerText = "再播放一次小星语音";
+        } catch (error) {
+          console.error("手动播放 TTS 失败：", error);
+          btn.disabled = false;
+          btn.innerText = "再试一次播放小星语音";
+          document.getElementById("status").innerText =
+            "语音播放还是不稳定，可以再点一次播放按钮，或者直接继续对话。";
+          recordEvent("tts_manual_play_failed", {
+            message: error.message,
+            childId: getParticipantId(),
+          });
+        }
+      };
+
+      area.appendChild(hint);
+      area.appendChild(btn);
+    }
+
+    function waitForAudioEvent(audio, eventName, timeoutMs, fallbackEvents = []) {
+      return new Promise((resolve, reject) => {
+        let done = false;
+        const cleanup = () => {
+          clearTimeout(timer);
+          audio.removeEventListener(eventName, onEvent);
+          audio.removeEventListener("error", onError);
+          fallbackEvents.forEach((name) => audio.removeEventListener(name, onEvent));
+        };
+        const finish = () => {
+          if (done) return;
+          done = true;
+          cleanup();
+          resolve();
+        };
+        const onEvent = () => finish();
+        const onError = () => {
+          if (done) return;
+          done = true;
+          cleanup();
+          reject(new Error("audio 播放出错"));
+        };
+        const timer = setTimeout(() => {
+          if (done) return;
+          done = true;
+          cleanup();
+          reject(new Error(`等待 audio ${eventName} 超时`));
+        }, timeoutMs);
+
+        audio.addEventListener(eventName, onEvent, { once: true });
+        audio.addEventListener("error", onError, { once: true });
+        fallbackEvents.forEach((name) => audio.addEventListener(name, onEvent, { once: true }));
+      });
+    }
+
+    async function playTTS(text, options = {}) {
+      const manual = Boolean(options.manual);
+      if (!manual) {
+        removeTTSReplayButton();
+      }
+
       const ttsResponse = await fetch("/api/tts", {
         method: "POST",
         headers: {
@@ -809,7 +929,7 @@
           text: text,
         }),
       });
-      
+
       if (!ttsResponse.ok) {
         let errMsg = "TTS 语音生成失败";
         try {
@@ -818,30 +938,60 @@
         } catch {}
         throw new Error(errMsg);
       }
-      
+
       const audioBlob = await ttsResponse.blob();
+      if (!audioBlob || audioBlob.size < 1000) {
+        throw new Error("TTS 返回的音频太小，可能没有成功生成声音");
+      }
+
       const audioUrl = URL.createObjectURL(audioBlob);
-      
+
       if (!globalTTSAudio) {
         globalTTSAudio = document.createElement("audio");
         globalTTSAudio.setAttribute("playsinline", "true");
+        globalTTSAudio.setAttribute("webkit-playsinline", "true");
         globalTTSAudio.preload = "auto";
         document.body.appendChild(globalTTSAudio);
       }
-      
+
       try {
         globalTTSAudio.pause();
         globalTTSAudio.currentTime = 0;
       } catch {}
-      
+
       globalTTSAudio.src = audioUrl;
       globalTTSAudio.muted = false;
       globalTTSAudio.volume = 1;
-      
+      globalTTSAudio.load();
+
+      isTTSPlaying = true;
+      const voiceButton = document.getElementById("holdToTalkButton");
+      if (voiceButton) voiceButton.disabled = true;
+
       try {
+        const started = waitForAudioEvent(globalTTSAudio, "playing", 5000, ["timeupdate"]);
+        const ended = waitForAudioEvent(globalTTSAudio, "ended", 90000);
+
         await globalTTSAudio.play();
-        recordEvent("tts_play", { text: text, childId: getParticipantId() });
+        await started;
+
+        recordEvent("tts_play", {
+          text: text,
+          childId: getParticipantId(),
+          size: audioBlob.size,
+          manual,
+        });
+
+        await ended;
+        recordEvent("tts_ended", {
+          text: text,
+          childId: getParticipantId(),
+          manual,
+          duration: globalTTSAudio.duration || null,
+        });
       } finally {
+        isTTSPlaying = false;
+        if (voiceButton) voiceButton.disabled = false;
         setTimeout(() => {
           URL.revokeObjectURL(audioUrl);
         }, 30000);
@@ -936,6 +1086,10 @@
             "小星正在说话……";
 
           await playTTS(replyText);
+          showTTSReplayButton(
+            replyText,
+            "如果 iPad 没有放出声音，可以点这里再播放一次。"
+          );
 
           document.getElementById("status").innerText =
             "小星已经回复啦。你可以继续按住按钮说话。";
@@ -947,8 +1101,12 @@
           });
           saveExperimentData();
 
+          showTTSReplayButton(
+            replyText,
+            "小星语音没有自动播出来，可以点这里手动播放。"
+          );
           document.getElementById("status").innerText =
-            "小星已经回复啦，但语音播放暂时失败。你可以继续按住按钮说话，或者直接打字。";
+            "小星已经回复啦，但语音播放暂时失败。你可以点播放按钮，或者继续按住按钮说话。";
         }
       } catch (error) {
         console.error(error);
@@ -997,6 +1155,15 @@
           currentAudio.pause();
           currentAudio.currentTime = 0;
         }
+        if (globalTTSAudio) {
+          try {
+            globalTTSAudio.pause();
+            globalTTSAudio.currentTime = 0;
+          } catch (error) {
+            console.warn("重置时停止 TTS 失败：", error);
+          }
+        }
+        removeTTSReplayButton();
 
         isHoldingToTalk = false;
         isRecognitionRunning = false;
@@ -1005,6 +1172,8 @@
         finalTranscript = "";
         lastVoiceError = null;
         audioUnlocked = false;
+        isTTSPlaying = false;
+        lastTTSReplayText = "";
         resetHoldButton();
       } catch (error) {
         console.error(error);
