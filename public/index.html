@@ -232,12 +232,10 @@
         <button
           id="holdToTalkButton"
           class="voice-button"
-          onmousedown="startHoldVoiceInput(event)"
-          onmouseup="stopHoldVoiceInput(event)"
-          onmouseleave="cancelHoldVoiceInput(event)"
-          ontouchstart="startHoldVoiceInput(event)"
-          ontouchend="stopHoldVoiceInput(event)"
-          ontouchcancel="cancelHoldVoiceInput(event)"
+          onpointerdown="startHoldVoiceInput(event)"
+          onpointerup="stopHoldVoiceInput(event)"
+          onpointercancel="stopHoldVoiceInput(event)"
+          oncontextmenu="event.preventDefault()"
         >
           按住说话
         </button>
@@ -354,6 +352,8 @@
     let isHoldingToTalk = false;
     let isRecognitionRunning = false;
     let finalTranscript = "";
+    let voiceMessageHandled = false;
+    let lastVoiceError = null;
     let isSending = false;
     let audioUnlocked = false;
     let currentAudio = null;
@@ -587,23 +587,36 @@
           "我听到的是：“" + text + "”。正在发送给小星……";
         sendMessage("voice");
       } else {
-        document.getElementById("status").innerText =
-          "刚刚没有听到内容，可以再按住说一次，或者直接打字。";
+        const message = lastVoiceError === "no-speech"
+          ? "刚刚没有听清内容，可以再按住说一次，或者直接打字。"
+          : "刚刚没有听到内容，可以再按住说一次，或者直接打字。";
+        document.getElementById("status").innerText = message;
       }
     }
 
     function startHoldVoiceInput(event) {
       if (event) {
         event.preventDefault();
+
+        // 移动端使用 Pointer Events，避免 touch + mouse 双重触发。
+        // setPointerCapture 可以减少手指轻微滑出按钮导致的误取消。
+        if (event.pointerId && event.currentTarget && event.currentTarget.setPointerCapture) {
+          try {
+            event.currentTarget.setPointerCapture(event.pointerId);
+          } catch (e) {}
+        }
       }
 
-      const participantId = getParticipantId();
+      const participantId = getParticipantId(false);
 
       if (participantId === "test_user") {
         document.getElementById("status").innerText =
           "请先输入被试编号，例如 001。";
         return;
       }
+
+      // 即使移动端“开始探索”没有成功点击，第一次按住说话时也补上被试状态。
+      ensureParticipantSession(participantId);
 
       if (isSending) {
         document.getElementById("status").innerText =
@@ -626,6 +639,7 @@
       isHoldingToTalk = true;
       isRecognitionRunning = false;
       voiceMessageHandled = false;
+      lastVoiceError = null;
       finalTranscript = "";
 
       const input = document.getElementById("userInput");
@@ -663,21 +677,29 @@
 
       recognition.onerror = function (event) {
         console.error("语音识别错误：", event.error, event.message);
+        lastVoiceError = event.error || "unknown";
 
-        isRecognitionRunning = false;
-        isHoldingToTalk = false;
-        voiceMessageHandled = true;
-        resetHoldButton();
-
+        // 权限类错误必须立刻结束；no-speech 等临时错误交给 onend / 松手后统一处理，
+        // 避免浏览器短暂误报后直接丢掉已经识别到的文字。
         if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+          isRecognitionRunning = false;
+          isHoldingToTalk = false;
+          voiceMessageHandled = true;
+          resetHoldButton();
           document.getElementById("status").innerText =
             "iPad 或浏览器暂时不允许继续使用语音。请检查麦克风权限，刷新页面后再试，也可以直接打字。";
-        } else if (event.error === "no-speech") {
+          return;
+        }
+
+        if (event.error === "no-speech") {
           document.getElementById("status").innerText =
-            "刚刚没有听到声音，可以再按住说一次，或者直接打字。";
+            "刚刚暂时没有听清，可以松开后再试一次，或者直接打字。";
+        } else if (event.error === "aborted") {
+          document.getElementById("status").innerText =
+            "这次语音输入已经停止。";
         } else {
           document.getElementById("status").innerText =
-            "语音识别暂时出错了，可以再按住说一次，或者直接打字。";
+            "语音识别暂时不稳定，可以再按住说一次，或者直接打字。";
         }
       };
 
@@ -714,6 +736,12 @@
     function stopHoldVoiceInput(event) {
       if (event) {
         event.preventDefault();
+
+        if (event.pointerId && event.currentTarget && event.currentTarget.releasePointerCapture) {
+          try {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+          } catch (e) {}
+        }
       }
 
       if (!isHoldingToTalk && !isRecognitionRunning) return;
@@ -746,7 +774,6 @@
       if (!isHoldingToTalk && !isRecognitionRunning) return;
 
       isHoldingToTalk = false;
-      voiceMessageHandled = true;
 
       if (recognition && isRecognitionRunning) {
         try {
@@ -759,9 +786,9 @@
       isRecognitionRunning = false;
       resetHoldButton();
 
-      document.getElementById("userInput").value = "";
+      // 不再清空输入框，避免移动端 touchcancel / 滑出按钮时误删已经识别到的内容。
       document.getElementById("status").innerText =
-        "已经取消这次语音输入，可以重新按住说话。";
+        "这次语音输入已经停止。如果内容不对，可以重新按住说话。";
 
       recordEvent("voice_cancel", { childId: getParticipantId() });
     }
@@ -976,6 +1003,7 @@
         voiceMessageHandled = false;
         isSending = false;
         finalTranscript = "";
+        lastVoiceError = null;
         audioUnlocked = false;
         resetHoldButton();
       } catch (error) {
