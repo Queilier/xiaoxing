@@ -246,9 +246,12 @@
         <button
           id="holdToTalkButton"
           class="voice-button"
-          onpointerdown="startHoldVoiceInput(event)"
-          onpointerup="stopHoldVoiceInput(event)"
-          onpointercancel="stopHoldVoiceInput(event)"
+          onmousedown="startHoldVoiceInput(event)"
+          onmouseup="stopHoldVoiceInput(event)"
+          onmouseleave="cancelHoldVoiceInput(event)"
+          ontouchstart="startHoldVoiceInput(event)"
+          ontouchend="stopHoldVoiceInput(event)"
+          ontouchcancel="cancelHoldVoiceInput(event)"
           oncontextmenu="event.preventDefault()"
         >
           按住说话
@@ -367,14 +370,8 @@
     let isHoldingToTalk = false;
     let isRecognitionRunning = false;
     let finalTranscript = "";
-    let interimTranscriptBuffer = "";
     let voiceMessageHandled = false;
     let lastVoiceError = null;
-    let voiceStopTimer = null;
-    let voiceFinishFallbackTimer = null;
-    let voiceHeardAudio = false;
-    let voiceHeardSpeech = false;
-    let voiceResultCount = 0;
     let isSending = false;
     let audioUnlocked = false;
     let currentAudio = null;
@@ -600,67 +597,22 @@
     }
 
 
-    function clearVoiceTimers() {
-      if (voiceStopTimer) {
-        clearTimeout(voiceStopTimer);
-        voiceStopTimer = null;
-      }
-      if (voiceFinishFallbackTimer) {
-        clearTimeout(voiceFinishFallbackTimer);
-        voiceFinishFallbackTimer = null;
-      }
-    }
-
-    function getBestVoiceTranscript() {
-      const input = document.getElementById("userInput");
-      const inputText = input ? input.value.trim() : "";
-      const bufferedText = (finalTranscript + interimTranscriptBuffer).trim();
-      const bestText = inputText || bufferedText;
-
-      // iPad Chrome 有时只返回 interim，不返回 final；这里把 interim 也作为兜底文本。
-      if (bestText && input && !inputText) {
-        input.value = bestText;
-      }
-
-      return bestText;
-    }
-
     function finishVoiceInput() {
       if (voiceMessageHandled) return;
       voiceMessageHandled = true;
-      clearVoiceTimers();
 
-      const text = getBestVoiceTranscript();
+      const text = document.getElementById("userInput").value.trim();
 
       resetHoldButton();
 
       if (text) {
-        recordEvent("voice_transcript_ready", {
-          childId: getParticipantId(),
-          text,
-          heardAudio: voiceHeardAudio,
-          heardSpeech: voiceHeardSpeech,
-          resultCount: voiceResultCount,
-          usedInterimFallback: !finalTranscript.trim() && Boolean(interimTranscriptBuffer.trim()),
-        });
         document.getElementById("status").innerText =
           "我听到的是：“" + text + "”。正在发送给小星……";
         sendMessage("voice");
       } else {
-        recordEvent("voice_no_transcript", {
-          childId: getParticipantId(),
-          lastVoiceError,
-          heardAudio: voiceHeardAudio,
-          heardSpeech: voiceHeardSpeech,
-          resultCount: voiceResultCount,
-        });
-
-        let message = "刚刚没有转成文字，可以再按住说一次，或者直接打字。";
-        if (lastVoiceError === "no-speech") {
-          message = "刚刚没有听清内容，可以离 iPad 近一点、说慢一点，再按住说一次。";
-        } else if (voiceHeardAudio || voiceHeardSpeech) {
-          message = "刚刚好像听到了声音，但没有成功转成文字。可以说慢一点、离 iPad 近一点，再试一次。";
-        }
+        const message = lastVoiceError === "no-speech"
+          ? "刚刚没有听清内容，可以再按住说一次，或者直接打字。"
+          : "刚刚没有听到内容，可以再按住说一次，或者直接打字。";
         document.getElementById("status").innerText = message;
       }
     }
@@ -668,14 +620,6 @@
     function startHoldVoiceInput(event) {
       if (event) {
         event.preventDefault();
-
-        // 移动端使用 Pointer Events，避免 touch + mouse 双重触发。
-        // setPointerCapture 可以减少手指轻微滑出按钮导致的误取消。
-        if (event.pointerId && event.currentTarget && event.currentTarget.setPointerCapture) {
-          try {
-            event.currentTarget.setPointerCapture(event.pointerId);
-          } catch (e) {}
-        }
       }
 
       const participantId = getParticipantId(false);
@@ -686,14 +630,6 @@
         return;
       }
 
-      // 即使移动端“开始探索”没有成功点击，第一次按住说话时也补上被试状态。
-      ensureParticipantSession(participantId);
-
-      if (!audioUnlocked) {
-        unlockAudio().catch((error) => {
-          console.warn("语音输入前解锁音频失败：", error);
-        });
-      }
 
       if (isTTSPlaying) {
         document.getElementById("status").innerText =
@@ -719,16 +655,11 @@
         return;
       }
 
-      clearVoiceTimers();
       isHoldingToTalk = true;
       isRecognitionRunning = false;
       voiceMessageHandled = false;
       lastVoiceError = null;
       finalTranscript = "";
-      interimTranscriptBuffer = "";
-      voiceHeardAudio = false;
-      voiceHeardSpeech = false;
-      voiceResultCount = 0;
 
       const input = document.getElementById("userInput");
       input.value = "";
@@ -746,29 +677,6 @@
 
       document.getElementById("status").innerText = "小星正在听你说话……";
 
-      recognition.onaudiostart = function () {
-        voiceHeardAudio = true;
-        recordEvent("voice_audio_start", { childId: getParticipantId() });
-      };
-
-      recognition.onsoundstart = function () {
-        voiceHeardAudio = true;
-        recordEvent("voice_sound_start", { childId: getParticipantId() });
-      };
-
-      recognition.onspeechstart = function () {
-        voiceHeardSpeech = true;
-        document.getElementById("status").innerText = "我听到声音了，请说完后松开按钮。";
-        recordEvent("voice_speech_start", { childId: getParticipantId() });
-      };
-
-      recognition.onspeechend = function () {
-        recordEvent("voice_speech_end", { childId: getParticipantId() });
-        if (isHoldingToTalk) {
-          document.getElementById("status").innerText = "我听到你说完了，可以松开按钮发送。";
-        }
-      };
-
       recognition.onresult = function (event) {
         let interimTranscript = "";
 
@@ -782,15 +690,8 @@
           }
         }
 
-        interimTranscriptBuffer = interimTranscript;
-        voiceResultCount += 1;
-
-        const currentText = finalTranscript + interimTranscriptBuffer;
+        const currentText = finalTranscript + interimTranscript;
         document.getElementById("userInput").value = currentText;
-
-        if (currentText.trim()) {
-          document.getElementById("status").innerText = "正在识别：“" + currentText.trim() + "”";
-        }
       };
 
       recognition.onerror = function (event) {
@@ -823,7 +724,6 @@
 
       recognition.onend = function () {
         isRecognitionRunning = false;
-        clearVoiceTimers();
 
         // 如果儿童还按着按钮，等他松手时再发送，避免 iPad 自动结束后重复发送
         if (isHoldingToTalk) {
@@ -855,53 +755,28 @@
     function stopHoldVoiceInput(event) {
       if (event) {
         event.preventDefault();
-
-        if (event.pointerId && event.currentTarget && event.currentTarget.releasePointerCapture) {
-          try {
-            event.currentTarget.releasePointerCapture(event.pointerId);
-          } catch (e) {}
-        }
       }
 
       if (!isHoldingToTalk && !isRecognitionRunning) return;
 
-      clearVoiceTimers();
       isHoldingToTalk = false;
 
       document.getElementById("status").innerText =
         "语音输入结束，正在整理你说的话……";
 
       if (recognition && isRecognitionRunning) {
-        // iPad Chrome 有时松手后还需要一点时间把声音整理成文字；
-        // 这里延迟 stop，并设置兜底 finish，避免一直卡住。
-        clearVoiceTimers();
-        voiceStopTimer = setTimeout(() => {
-          try {
-            recognition.stop();
-          } catch (error) {
-            console.warn("停止语音识别失败，直接整理已识别内容：", error);
-            isRecognitionRunning = false;
-            finishVoiceInput();
-          }
-        }, 500);
-
-        voiceFinishFallbackTimer = setTimeout(() => {
-          if (!voiceMessageHandled) {
-            console.warn("语音识别 onend 未及时触发，使用兜底整理内容");
-            isRecognitionRunning = false;
-            finishVoiceInput();
-          }
-        }, 2600);
+        try {
+          recognition.stop();
+        } catch (error) {
+          console.warn("停止语音识别失败，直接整理已识别内容：", error);
+          isRecognitionRunning = false;
+          finishVoiceInput();
+        }
       } else {
         finishVoiceInput();
       }
 
-      recordEvent("voice_end", {
-        childId: getParticipantId(),
-        heardAudio: voiceHeardAudio,
-        heardSpeech: voiceHeardSpeech,
-        resultCount: voiceResultCount,
-      });
+      recordEvent("voice_end", { childId: getParticipantId() });
     }
 
     function cancelHoldVoiceInput(event) {
@@ -912,6 +787,7 @@
       if (!isHoldingToTalk && !isRecognitionRunning) return;
 
       isHoldingToTalk = false;
+      voiceMessageHandled = true;
 
       if (recognition && isRecognitionRunning) {
         try {
@@ -924,9 +800,9 @@
       isRecognitionRunning = false;
       resetHoldButton();
 
-      // 不再清空输入框，避免移动端 touchcancel / 滑出按钮时误删已经识别到的内容。
+      document.getElementById("userInput").value = "";
       document.getElementById("status").innerText =
-        "这次语音输入已经停止。如果内容不对，可以重新按住说话。";
+        "已经取消这次语音输入，可以重新按住说话。";
 
       recordEvent("voice_cancel", { childId: getParticipantId() });
     }
@@ -1325,12 +1201,7 @@
         voiceMessageHandled = false;
         isSending = false;
         finalTranscript = "";
-        interimTranscriptBuffer = "";
         lastVoiceError = null;
-        voiceHeardAudio = false;
-        voiceHeardSpeech = false;
-        voiceResultCount = 0;
-        clearVoiceTimers();
         audioUnlocked = false;
         isTTSPlaying = false;
         lastTTSReplayText = "";
