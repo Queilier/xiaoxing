@@ -884,7 +884,7 @@
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "tts-replay-button";
-      btn.innerText = "点这里播放小星语音";
+      btn.innerText = "再听一次小星的话";
       btn.onclick = function () {
         if (!lastTTSReplayUrl) {
           btn.innerText = "没有可播放的语音，请让小星再回复一次";
@@ -1126,10 +1126,7 @@
             "小星正在说话……";
 
           await playTTS(replyText);
-          showTTSReplayButton(
-            replyText,
-            "如果 iPad 没有放出声音，可以点这里再播放一次。"
-          );
+          showTTSReplayButton(replyText, "如果没有听到小星的声音，可以点这里再听一次。");
 
           document.getElementById("status").innerText =
             "小星已经回复啦。你可以继续按住按钮说话。";
@@ -1141,10 +1138,7 @@
           });
           saveExperimentData();
 
-          showTTSReplayButton(
-            replyText,
-            "小星语音没有自动播出来，可以点这里手动播放。"
-          );
+          showTTSReplayButton(replyText, "小星刚才没有成功播放声音，可以点这里再试一次。");
           document.getElementById("status").innerText =
             "小星已经回复啦，但语音播放暂时失败。你可以点播放按钮，或者继续按住按钮说话。";
         }
