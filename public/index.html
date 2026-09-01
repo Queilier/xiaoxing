@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>小星科学探索</title>
 
   <style>
@@ -17,6 +18,8 @@
       max-width: 900px;
       margin: 0 auto;
       padding: 40px 20px;
+      box-sizing: border-box;
+      width: 100%;
     }
 
     .card {
@@ -71,7 +74,9 @@
       display: flex;
       flex-direction: column;
       gap: 10px;
-      height: 430px;
+      height: 60vh; /* 使用视窗高度，随屏幕调整 */
+      max-height: 600px;
+      min-height: 220px;
       overflow-y: auto;
       background: #fbfdff;
       border: 1px solid #edf2f7;
@@ -209,6 +214,10 @@
       .participant-input {
         max-width: 100%;
       }
+
+      .page { padding: 20px 12px; }
+
+      .chat-box { height: 50vh; }
     }
   </style>
 </head>
