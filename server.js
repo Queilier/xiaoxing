@@ -76,7 +76,7 @@ function isVideoDone(text = "") {
 }
 
 function isReady(text = "") {
-  return /^(准备好了|准备好|好了|开始吧|可以|好|嗯|ready|yes)$/i.test(normalizeText(text));
+  return /^(准备好了|准备好|好了|好啦|开始吧|可以|好|嗯|ready|yes)$/i.test(normalizeText(text));
 }
 
 function chooseTopic(text = "") {
