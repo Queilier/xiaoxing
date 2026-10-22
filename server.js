@@ -1,4 +1,5 @@
 import express from "express";
+import OpenAI, { toFile } from "openai";
 import dotenv from "dotenv";
 import path from "path";
 import fs from "fs/promises";
@@ -16,10 +17,13 @@ const port = process.env.PORT || 3000;
 
 app.use(express.json());
 
-const COZE_API_TOKEN = process.env.COZE_API_TOKEN;
-const COZE_BOT_ID = process.env.COZE_BOT_ID;
-const COZE_USER_ID = process.env.COZE_USER_ID || "child_001";
-const COZE_VOICE_ID = process.env.COZE_VOICE_ID || "7620288417930297386";
+const openai = process.env.OPENAI_API_KEY
+  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  : null;
+const OPENAI_CHAT_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-5.6-terra";
+const OPENAI_TTS_MODEL = process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts";
+const OPENAI_TRANSCRIPTION_MODEL = process.env.OPENAI_TRANSCRIPTION_MODEL || "gpt-transcribe";
+const OPENAI_TTS_VOICE = process.env.OPENAI_TTS_VOICE || "coral";
 
 const TOPICS = ["遇水开花", "牙签五角星"];
 const SCIENCE_ANSWER_PROMPT_TEMPLATE = await fs.readFile(
@@ -169,9 +173,9 @@ function fillPromptTemplate(template, variables) {
     .replace(/{{\s*conversationHistory\s*}}/g, variables.conversationHistory || "");
 }
 
-async function callAIProvider({ currentTopic, userQuestion, conversationHistory, userId }) {
-  if (!COZE_API_TOKEN || !COZE_BOT_ID) {
-    throw new Error("缺少 COZE_API_TOKEN 或 COZE_BOT_ID。请检查环境变量。");
+async function callAIProvider({ currentTopic, userQuestion, conversationHistory }) {
+  if (!openai) {
+    throw new Error("缺少 OPENAI_API_KEY。请在 .env 或部署平台环境变量中配置 OpenAI API 密钥。");
   }
 
   const conversationText = formatConversationHistory(conversationHistory || []);
@@ -181,139 +185,15 @@ async function callAIProvider({ currentTopic, userQuestion, conversationHistory,
     conversationHistory: conversationText,
   });
 
-  const userMessage = [
-    `childId: ${userId || "unknown"}`,
-    `currentTopic: ${currentTopic || "未指定主题"}`,
-    `userQuestion: ${userQuestion || ""}`,
-    "conversationHistory:",
-    conversationText || "无",
-  ].join("\n\n");
-
-  const chatResponse = await fetch("https://api.coze.cn/v3/chat", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${COZE_API_TOKEN}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      bot_id: COZE_BOT_ID,
-      user_id: userId,
-      stream: false,
-      auto_save_history: true,
-      additional_messages: [
-        {
-          role: "system",
-          content: prompt,
-          content_type: "text",
-        },
-        {
-          role: "user",
-          content: userMessage,
-          content_type: "text",
-        },
-      ],
-    }),
+  const completion = await openai.chat.completions.create({
+    model: OPENAI_CHAT_MODEL,
+    messages: [{ role: "system", content: prompt }],
   });
 
-  const chatText = await chatResponse.text();
-  let chatData;
-  try {
-    chatData = JSON.parse(chatText);
-  } catch {
-    throw new Error("Coze 返回的不是 JSON：" + chatText);
+  const rawReply = completion.choices?.[0]?.message?.content;
+  if (!rawReply?.trim()) {
+    throw new Error("OpenAI 没有返回有效的文字回复。");
   }
-
-  if (!chatResponse.ok || chatData.code !== 0) {
-    throw new Error(chatData.msg || chatData.message || JSON.stringify(chatData));
-  }
-
-  const conversationId = chatData.data?.conversation_id;
-  const chatId = chatData.data?.id;
-
-  if (!conversationId || !chatId) {
-    throw new Error(
-      "Coze 返回中没有 conversation_id 或 chat_id：" + JSON.stringify(chatData)
-    );
-  }
-
-  let status = "created";
-  for (let i = 0; i < 30; i++) {
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    const retrieveUrl = `https://api.coze.cn/v3/chat/retrieve?conversation_id=${conversationId}&chat_id=${chatId}`;
-    const retrieveResponse = await fetch(retrieveUrl, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${COZE_API_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-    });
-
-    const retrieveText = await retrieveResponse.text();
-    let retrieveData;
-    try {
-      retrieveData = JSON.parse(retrieveText);
-    } catch {
-      throw new Error("retrieve 返回的不是 JSON：" + retrieveText);
-    }
-
-    if (!retrieveResponse.ok || retrieveData.code !== 0) {
-      throw new Error(
-        retrieveData.msg || retrieveData.message || JSON.stringify(retrieveData)
-      );
-    }
-
-    status = retrieveData.data?.status;
-    if (status === "completed") {
-      break;
-    }
-
-    if (status === "failed" || status === "requires_action" || status === "canceled") {
-      throw new Error(
-        "Coze 对话异常结束，状态：" + status + "；详情：" + JSON.stringify(retrieveData)
-      );
-    }
-  }
-
-  if (status !== "completed") {
-    throw new Error("Coze 回复超时，最后状态：" + status);
-  }
-
-  const messageUrl = `https://api.coze.cn/v3/chat/message/list?conversation_id=${conversationId}&chat_id=${chatId}`;
-  const messagesResponse = await fetch(messageUrl, {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${COZE_API_TOKEN}`,
-      "Content-Type": "application/json",
-    },
-  });
-
-  const messagesText = await messagesResponse.text();
-  let messagesData;
-  try {
-    messagesData = JSON.parse(messagesText);
-  } catch {
-    throw new Error("message/list 返回的不是 JSON：" + messagesText);
-  }
-
-  if (!messagesResponse.ok || messagesData.code !== 0) {
-    throw new Error(
-      messagesData.msg || messagesData.message || JSON.stringify(messagesData)
-    );
-  }
-
-  const messages = messagesData.data || [];
-  const answerMessage = messages
-    .filter((msg) => msg.role === "assistant")
-    .filter((msg) => msg.type === "answer")
-    .pop();
-  const fallbackMessage = messages
-    .filter((msg) => msg.role === "assistant")
-    .pop();
-
-  const rawReply =
-    answerMessage?.content ||
-    fallbackMessage?.content ||
-    "小星刚刚没有听清楚，你可以再说一次吗？";
 
   return rawReply
     .replace(/\[(ADVANCE_TO_NEXT_TOPIC|END_ACTIVITY|ALL_TOPICS_DONE)\]/g, "")
@@ -567,6 +447,52 @@ app.post("/api/chat", async (req, res) => {
   }
 });
 
+app.post(
+  "/api/transcribe",
+  express.raw({
+    type: ["audio/webm", "audio/mp4", "audio/mpeg", "audio/wav", "audio/x-m4a"],
+    limit: "25mb",
+  }),
+  async (req, res) => {
+    try {
+      if (!openai) {
+        return res.status(500).json({
+          error: "缺少 OPENAI_API_KEY。请在 .env 或部署平台环境变量中配置 OpenAI API 密钥。",
+        });
+      }
+      if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+        return res.status(400).json({ error: "没有收到录音，请再按住说一次。" });
+      }
+
+      const contentType = (req.get("content-type") || "audio/webm").split(";")[0];
+      const extensionByType = {
+        "audio/webm": "webm",
+        "audio/mp4": "mp4",
+        "audio/mpeg": "mp3",
+        "audio/wav": "wav",
+        "audio/x-m4a": "m4a",
+      };
+      const extension = extensionByType[contentType];
+      if (!extension) {
+        return res.status(415).json({ error: "当前浏览器录音格式暂不支持，请改用文字输入。" });
+      }
+
+      const transcription = await openai.audio.transcriptions.create({
+        file: await toFile(req.body, `child-question.${extension}`, { type: contentType }),
+        model: OPENAI_TRANSCRIPTION_MODEL,
+        languages: ["zh-cn"],
+        prompt: "这是 5 到 6 岁儿童关于科学视频的中文对话。主题词包括：遇水开花、牙签五角星。请准确转写听到的原话，不要补充内容。",
+        response_format: "json",
+      });
+
+      res.json({ ok: true, text: transcription.text || "" });
+    } catch (error) {
+      console.error("OpenAI transcription error:", error);
+      res.status(500).json({ error: error.message || "语音识别失败，请再试一次或直接打字。" });
+    }
+  }
+);
+
 app.post("/api/tts", async (req, res) => {
   try {
     const text = req.body.text;
@@ -575,43 +501,26 @@ app.post("/api/tts", async (req, res) => {
       return res.status(400).json({ error: "text 不能为空" });
     }
 
-    if (!COZE_API_TOKEN) {
-      return res.status(500).json({ error: "缺少 COZE_API_TOKEN，请检查 .env 文件。" });
+    if (!openai) {
+      return res.status(500).json({
+        error: "缺少 OPENAI_API_KEY。请在 .env 或部署平台环境变量中配置 OpenAI API 密钥。",
+      });
     }
 
-    if (!COZE_VOICE_ID) {
-      return res.status(500).json({ error: "缺少 COZE_VOICE_ID，请检查 .env 文件。" });
-    }
-
-    console.log("准备生成语音，文本：", text);
-    console.log("使用音色 ID：", COZE_VOICE_ID);
-
-    const ttsResponse = await fetch("https://api.coze.cn/v1/audio/speech", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${COZE_API_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        input: text,
-        voice_id: COZE_VOICE_ID,
-        response_format: "mp3",
-      }),
+    const speech = await openai.audio.speech.create({
+      model: OPENAI_TTS_MODEL,
+      voice: OPENAI_TTS_VOICE,
+      input: text,
+      instructions: "请用普通话，以亲切、清晰、自然的语气和 5 到 6 岁的小朋友说话。语速稍慢，发音清楚。",
+      response_format: "mp3",
     });
 
-    const contentType = ttsResponse.headers.get("content-type") || "";
-    const arrayBuffer = await ttsResponse.arrayBuffer();
-
-    if (!ttsResponse.ok) {
-      const errorText = Buffer.from(arrayBuffer).toString("utf-8");
-      console.error("Coze TTS error:", errorText);
-      return res.status(ttsResponse.status).json({ error: "Coze TTS 失败：" + errorText });
-    }
-
-    res.setHeader("Content-Type", contentType || "audio/mpeg");
-    res.send(Buffer.from(arrayBuffer));
+    const audioBuffer = Buffer.from(await speech.arrayBuffer());
+    res.setHeader("Content-Type", "audio/mpeg");
+    res.setHeader("Cache-Control", "no-store");
+    res.send(audioBuffer);
   } catch (error) {
-    console.error("TTS server error:", error);
+    console.error("OpenAI TTS error:", error);
     res.status(500).json({ error: error.message || "TTS 语音生成失败。" });
   }
 });
