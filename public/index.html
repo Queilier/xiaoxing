@@ -91,6 +91,15 @@
     .video-topic-button { flex: 1; padding: 10px 12px; font-size: 15px; }
     .video-topic-button.active { background: #dff4df; }
 
+    #replayVideoButton {
+      display: block;
+      width: fit-content;
+      max-width: 100%;
+      margin: 14px auto 0;
+      padding: 10px 20px;
+      background: #fff3cd;
+    }
+
     .badge {
       display: inline-block;
       padding: 8px 18px;
@@ -730,49 +739,88 @@
       });
     }
 
-    async function startChat() {
-      const participantId = getParticipantId(false);
+    async function speakAssistantReply(replyText, successStatus = "小星已经回复啦。你可以继续按住按钮说话。") {
+      try {
+        document.getElementById("status").innerText =
+          "小星正在生成语音……";
 
+        await playTTS(replyText);
+        showTTSReplayButton(replyText, "如果没有听到小星的声音，可以点这里再听一次。");
+
+        document.getElementById("status").innerText =
+          successStatus;
+      } catch (ttsError) {
+        console.error("TTS 播放失败：", ttsError);
+        const ttsDetail = String(ttsError?.message || "").slice(0, 220);
+        window.experimentData.errors.push({
+          t: new Date().toISOString(),
+          message: "TTS 播放失败：" + (ttsDetail || "未知错误"),
+        });
+        saveExperimentData();
+
+        showTTSReplayButton(
+          replyText,
+          ttsDetail
+            ? `语音生成或播放失败：${ttsDetail}`
+            : "小星刚才没有成功播放声音，可以点这里再试一次。"
+        );
+        document.getElementById("status").innerText =
+          `小星已经回复啦，但语音生成或播放失败${ttsDetail ? `：${ttsDetail}` : ""}。你可以点播放按钮，或者继续按住按钮说话。`;
+      }
+    }
+
+    async function startChat() {
+      if (isSending || isTTSPlaying) return;
+      const participantId = getParticipantId(false);
       if (!participantId || participantId === "test_user") {
         document.getElementById("status").innerText =
           "请先输入被试编号，例如 001。";
         return;
       }
 
-      // 音频解锁放在编号验证之后，并且不能阻塞实验开始
+      isSending = true;
+      const startButton = document.getElementById("startChatBtn");
+      if (startButton) startButton.disabled = true;
       try {
+        // 点击时激活音频，再使用与正常回复相同的豆包语音播放流程。
         await unlockAudio();
-      } catch (error) {
-        console.warn("音频解锁失败，但继续开始探索：", error);
-      }
+        const chatBox = document.getElementById("chatBox");
+        ensureParticipantSession(participantId);
 
-      const chatBox = document.getElementById("chatBox");
-
-      // 移动端有时“开始探索”的点击/触摸事件不稳定；这里统一兜底初始化被试会话。
-      ensureParticipantSession(participantId);
-
-      if (chatBox.children.length === 0) {
-        if (window.experimentData.chatHistory.length > 0) {
-          renderSavedHistory();
-        } else {
-          const greeting =
-            "小朋友你好！让我们一起来进行科学探索吧！你准备好开始了吗～如果你准备好了，可以和我说‘准备好了’！";
-          addMessage("assistant", greeting);
-          window.experimentData.chatHistory.push({
-            role: "assistant",
-            text: greeting,
-            t: new Date().toISOString(),
-          });
+        if (chatBox.children.length === 0) {
+          if (window.experimentData.chatHistory.length > 0) {
+            renderSavedHistory();
+          } else {
+            const greeting =
+              "小朋友你好！让我们一起来进行科学探索吧！你准备好开始了吗～如果你准备好了，可以和我说‘准备好了’！";
+            addMessage("assistant", greeting);
+            window.experimentData.chatHistory.push({
+              role: "assistant", text: greeting, t: new Date().toISOString(),
+            });
+          }
         }
+
+        syncExperimentState(window.experimentData.experimentState);
+        saveExperimentData();
+        recordEvent("start_chat", { childId: participantId });
+
+        const history = window.experimentData.chatHistory;
+        // 新开场和刷新后仅有开场白的会话都可朗读；恢复进行中的对话不重播开场。
+        if (window.experimentData.experimentState.phase === "waiting_ready" &&
+            history.length === 1 && history[0].role === "assistant") {
+          await speakAssistantReply(history[0].text,
+            "小星说完啦！按住“按住说话”，告诉小星你准备好了吧。");
+        } else {
+          document.getElementById("status").innerText =
+            "当前被试编号：" + participantId + "。现在可以开始和小星聊天啦。";
+        }
+      } catch (error) {
+        console.error("开始探索失败：", error);
+        document.getElementById("status").innerText = "开始探索时出错了：" + error.message;
+      } finally {
+        isSending = false;
+        if (startButton) startButton.disabled = false;
       }
-
-      syncExperimentState(window.experimentData.experimentState);
-      saveExperimentData();
-
-      recordEvent("start_chat", { childId: participantId });
-
-      document.getElementById("status").innerText =
-        "当前被试编号：" + participantId + "。现在可以开始和小星聊天啦。";
     }
 
 
@@ -840,11 +888,14 @@
           }
 
           document.getElementById("status").innerText = "录音完成，小星正在识别你说的话……";
+          const transcriptionController = new AbortController();
+          const transcriptionTimeout = setTimeout(() => transcriptionController.abort(), 45000);
           try {
             const response = await fetch("/api/transcribe", {
               method: "POST",
               headers: { "Content-Type": recorderMimeType.split(";")[0] },
               body: audioBlob,
+              signal: transcriptionController.signal,
             });
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || "语音识别失败");
@@ -863,9 +914,14 @@
             sendMessage("voice");
           } catch (error) {
             isRecognitionRunning = false;
+            if (transcriptionController.signal.aborted) {
+              error = new Error("语音识别等待超过 45 秒，请检查网络或识别服务状态后重试");
+            }
             document.getElementById("status").innerText =
               `语音识别失败：${error.message}。可以再试一次，或者直接打字。`;
             recordEvent("transcription_failed", { message: error.message, childId: participantId });
+          } finally {
+            clearTimeout(transcriptionTimeout);
           }
         };
 
@@ -940,34 +996,42 @@
     }
 
     async function fetchTTSAudioUrl(text) {
-      const ttsResponse = await fetch("/api/tts", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          text: text,
-        }),
-      });
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 45000);
+      try {
+        const ttsResponse = await fetch("/api/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+          signal: controller.signal,
+        });
 
-      if (!ttsResponse.ok) {
-        let errMsg = "TTS 语音生成失败";
-        try {
-          const errData = await ttsResponse.json();
-          errMsg = errData.error || errMsg;
-        } catch {}
-        throw new Error(errMsg);
+        if (!ttsResponse.ok) {
+          let errMsg = "TTS 语音生成失败";
+          try {
+            const errData = await ttsResponse.json();
+            errMsg = errData.error || errMsg;
+          } catch {}
+          throw new Error(errMsg);
+        }
+
+        const audioBlob = await ttsResponse.blob();
+        if (!audioBlob || audioBlob.size < 1000) {
+          throw new Error("TTS 返回的音频太小，可能没有成功生成声音");
+        }
+
+        return {
+          url: URL.createObjectURL(audioBlob),
+          size: audioBlob.size,
+        };
+      } catch (error) {
+        if (controller.signal.aborted) {
+          throw new Error("语音生成等待超过 45 秒，请检查网络或语音服务状态后重试");
+        }
+        throw error;
+      } finally {
+        clearTimeout(timeout);
       }
-
-      const audioBlob = await ttsResponse.blob();
-      if (!audioBlob || audioBlob.size < 1000) {
-        throw new Error("TTS 返回的音频太小，可能没有成功生成声音");
-      }
-
-      return {
-        url: URL.createObjectURL(audioBlob),
-        size: audioBlob.size,
-      };
     }
 
     function showTTSReplayButton(text, reason = "") {
@@ -987,42 +1051,41 @@
       btn.type = "button";
       btn.className = "tts-replay-button";
       btn.innerText = "再听一次小星的话";
-      btn.onclick = function () {
-        if (!lastTTSReplayUrl) {
-          btn.innerText = "没有可播放的语音，请让小星再回复一次";
-          document.getElementById("status").innerText =
-            "这条语音没有缓存成功，可以继续对话让小星再回复一次。";
-          return;
-        }
-
+      btn.onclick = async function () {
         btn.disabled = true;
-        btn.innerText = "正在播放……";
-        document.getElementById("status").innerText = "小星正在说话……";
-
-        // 关键：这里不要重新 fetch，也不要先 await unlockAudio。
-        // iPad Chrome 上，按钮点击后的用户手势很短；必须尽快调用 audio.play()。
-        playPreparedTTS(lastTTSReplayUrl, {
-          text: lastTTSReplayText,
-          manual: true,
-          size: lastTTSReplayBlobSize,
-        })
-          .then(() => {
-            document.getElementById("status").innerText =
-              "小星已经回复啦。你可以继续按住按钮说话。";
-            btn.disabled = false;
-            btn.innerText = "再播放一次小星语音";
-          })
-          .catch((error) => {
-            console.error("手动播放 TTS 失败：", error);
-            btn.disabled = false;
-            btn.innerText = "再试一次播放小星语音";
-            document.getElementById("status").innerText =
-              "语音播放还是不稳定，可以再点一次播放按钮，或者直接继续对话。";
-            recordEvent("tts_manual_play_failed", {
-              message: error.message,
-              childId: getParticipantId(),
-            });
+        btn.innerText = lastTTSReplayUrl ? "正在播放……" : "正在重新生成语音……";
+        try {
+          if (!lastTTSReplayUrl) {
+            // 在点击手势中解锁声音，再重新请求此前生成失败的音频。
+            unlockAudio();
+            document.getElementById("status").innerText = "正在重新生成小星的语音……";
+            const prepared = await fetchTTSAudioUrl(text);
+            lastTTSReplayUrl = prepared.url;
+            lastTTSReplayBlobSize = prepared.size;
+            lastTTSReplayText = text;
+          }
+          document.getElementById("status").innerText = "小星正在说话……";
+          await playPreparedTTS(lastTTSReplayUrl, {
+            text: lastTTSReplayText,
+            manual: true,
+            size: lastTTSReplayBlobSize,
           });
+          document.getElementById("status").innerText =
+            "小星已经回复啦。你可以继续按住按钮说话。";
+          hint.innerText = "语音已准备好，可以再次播放。";
+          btn.innerText = "再播放一次小星语音";
+        } catch (error) {
+          console.error("手动播放 TTS 失败：", error);
+          btn.innerText = "重试小星语音";
+          document.getElementById("status").innerText =
+            `语音重试失败：${String(error.message || "未知错误").slice(0, 220)}`;
+          recordEvent("tts_manual_play_failed", {
+            message: error.message,
+            childId: getParticipantId(),
+          });
+        } finally {
+          btn.disabled = false;
+        }
       };
 
       area.appendChild(hint);
@@ -1056,8 +1119,10 @@
           reject(new Error("audio 播放出错"));
         };
         const timer = setTimeout(() => {
-          // iPad Chrome 有时不会触发 ended。超时后按“完成一次播放尝试”处理，避免 UI 卡死。
-          finish("timeout");
+          if (done) return;
+          done = true;
+          cleanup();
+          reject(new Error("等待语音播放结束超时，请点“再听一次”重试。"));
         }, timeoutMs);
 
         audio.addEventListener("ended", onEnded, { once: true });
@@ -1094,7 +1159,12 @@
       if (voiceButton) voiceButton.disabled = true;
 
       try {
-        await globalTTSAudio.play();
+        await new Promise((resolve, reject) => {
+          const timer = setTimeout(() => {
+            reject(new Error("浏览器未能启动语音播放，请点“再听一次”重试。"));
+          }, 10000);
+          globalTTSAudio.play().then(resolve, reject).finally(() => clearTimeout(timer));
+        });
         recordEvent("tts_play", {
           text,
           childId: getParticipantId(),
@@ -1102,8 +1172,10 @@
           manual,
         });
 
-        // 最多等 18 秒，避免 iPad Chrome 不触发 ended 时按钮一直“正在播放”。
-        const result = await waitForAudioFinish(globalTTSAudio, 18000);
+        // 依据音频时长等待结束，保留超时以免按钮卡住。
+        const audioDuration = Number.isFinite(globalTTSAudio.duration) ? globalTTSAudio.duration : 0;
+        const finishTimeout = Math.min(90000, Math.max(30000, audioDuration * 1000 + 10000));
+        const result = await waitForAudioFinish(globalTTSAudio, finishTimeout);
         recordEvent("tts_finish", {
           text,
           childId: getParticipantId(),
@@ -1113,6 +1185,10 @@
           currentTime: globalTTSAudio.currentTime || null,
         });
       } finally {
+        try {
+          globalTTSAudio.pause();
+          if (globalTTSAudio.error) globalTTSAudio.currentTime = 0;
+        } catch {}
         isTTSPlaying = false;
         if (voiceButton) voiceButton.disabled = false;
       }
@@ -1125,7 +1201,7 @@
         clearCachedTTSReplayUrl();
       }
 
-      // 自动播放时先生成一次语音并缓存。手动按钮直接播放缓存，避免 iPad Chrome 用户手势失效。
+      // 先生成并缓存音频；生成失败时，重播按钮允许重新请求。
       if (!lastTTSReplayUrl || lastTTSReplayText !== text) {
         const prepared = await fetchTTSAudioUrl(text);
         lastTTSReplayUrl = prepared.url;
@@ -1223,27 +1299,7 @@
 
         addMessage("assistant", replyText);
 
-        try {
-          document.getElementById("status").innerText =
-            "小星正在说话……";
-
-          await playTTS(replyText);
-          showTTSReplayButton(replyText, "如果没有听到小星的声音，可以点这里再听一次。");
-
-          document.getElementById("status").innerText =
-            "小星已经回复啦。你可以继续按住按钮说话。";
-        } catch (ttsError) {
-          console.error("TTS 播放失败：", ttsError);
-          window.experimentData.errors.push({
-            t: new Date().toISOString(),
-            message: "TTS 播放失败：" + ttsError.message,
-          });
-          saveExperimentData();
-
-          showTTSReplayButton(replyText, "小星刚才没有成功播放声音，可以点这里再试一次。");
-          document.getElementById("status").innerText =
-            "小星已经回复啦，但语音播放暂时失败。你可以点播放按钮，或者继续按住按钮说话。";
-        }
+        await speakAssistantReply(replyText);
       } catch (error) {
         console.error(error);
         const fallbackReply = "小星暂时无法回复，请稍后再试。";

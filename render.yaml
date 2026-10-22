@@ -7,6 +7,12 @@ services:
     buildCommand: npm install
     startCommand: npm start
     envVars:
+      - key: TTS_PROVIDER
+        value: doubao
+      - key: DOUBAO_API_KEY
+        sync: false
+      - key: DOUBAO_TTS_VOICE
+        value: zh_female_linjianvhai_uranus_bigtts
       - key: OPENAI_API_KEY
         sync: false
       - key: OPENAI_CHAT_MODEL
@@ -14,6 +20,6 @@ services:
       - key: OPENAI_TTS_MODEL
         value: gpt-4o-mini-tts
       - key: OPENAI_TTS_VOICE
-        value: coral
+        value: nova
       - key: OPENAI_TRANSCRIPTION_MODEL
         value: gpt-transcribe
