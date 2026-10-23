@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isReady, chooseTopic, extractTopicWithCorrection } from "../conversation-intents.js";
+import { isReady, isNoQuestion, chooseTopic, extractTopicWithCorrection } from "../conversation-intents.js";
 
 test("准备确认接受常见肯定说法、语气词和语音识别标点", () => {
   for (const text of ["准备好了", "准备好啦", "好啦", "好了", "可以了", "可以啦", "可以", "好", "好的", "开始吧", "我准备好了", "我已经准备好啦", "我们准备好了", "嗯嗯", "行啦", "没问题", "准备好啦！", "好 啦", "OK"]) {
@@ -57,5 +57,18 @@ test("纠正选题时同样支持简称和裸数字，以最后一次选择为�
     ["换成牙签", "牙签五角星"],
   ]) {
     assert.equal(extractTopicWithCorrection(text), topic, text);
+  }
+});
+
+
+test("没有问题接受带口头语、语气词的自然表达", () => {
+  for (const text of ["嗯，没有了。", "嗯嗯，没有问题啦", "哦，没有了", "好的，我没有问题了", "没有啦", "没有了呀", "我没问题了", "嗯，我没有什么问题了", "没有别的问题了", "没了", "不想问了", "问完了", "不用了", "结束吧", "今天到这里吧", "再见", "不知道问什么"]) {
+    assert.equal(isNoQuestion(text), true, text);
+  }
+});
+
+test("结束提问不会吞掉真正的问题或普通确认", () => {
+  for (const text of ["嗯", "好", "好的", "好了", "可以了", "视频看完了", "我没有看懂", "我还有问题", "没有水花会开吗", "嗯，没有了，但是我还有一个问题", "没有问题吗", "我没有说没有问题", "为什么没有开花", "没有了还可以再问吗"]) {
+    assert.equal(isNoQuestion(text), false, text);
   }
 });

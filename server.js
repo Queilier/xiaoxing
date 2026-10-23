@@ -7,7 +7,7 @@ import { fileURLToPath } from "url";
 import { execFileSync } from "node:child_process";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import { synthesizeDoubaoSpeech } from "./doubao-tts.js";
-import { normalizeText, isReady, chooseTopic, extractTopicWithCorrection } from "./conversation-intents.js";
+import { normalizeText, isReady, isNoQuestion, chooseTopic, extractTopicWithCorrection } from "./conversation-intents.js";
 
 dotenv.config();
 
@@ -88,16 +88,6 @@ function initExperimentState(state = {}) {
 // FIX #1: When a new childId is passed that differs from the one embedded in
 // the incoming state, return a fully-reset state instead of using the old one.
 // This is enforced in the /api/chat handler below.
-
-function isNoQuestion(text = "") {
-  const clean = normalizeText(text).toLowerCase();
-  // FIX #6: tightened so short "好" / "可以了" / "好了" / "好啦" etc.
-  // (which overlap with isVideoDone) are NOT matched here.
-  // We only match expressions that genuinely mean "I have no questions".
-  return /^(没(?:有(?:了)?)?问题(?:了)?|我没有问题|没有了|没了|没有想问(?:的)?|没想问的|不用了|不用|不想问(?:了)?|问完了|不知道(?:问什么)?|没有了|结束吧|结束(?:了)?|再见|今天到这里(?:吧)?|全部结束|活动结束|不想继续了|没有)$/i.test(
-    clean
-  );
-}
 
 function isNextTopicIntent(text = "") {
   const clean = normalizeText(text).toLowerCase();

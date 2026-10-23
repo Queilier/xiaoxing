@@ -20,6 +20,20 @@ export function isReady(text = "") {
   return true;
 }
 
+// 仅在问答阶段判断；接受口头语，但不能吞掉后续真正的问题。
+export function isNoQuestion(text = "") {
+  let clean = normalizeText(text).replace(/[\s~～“”‘’"']/g, "");
+  const filler = /(?:嗯(?:嗯|哼)?|呃|唔|哦|噢|好(?:的|啦|吧)?|对(?:的)?|是的|那个|这个)/iy;
+  let offset = 0;
+  while (offset < clean.length) {
+    filler.lastIndex = offset;
+    if (!filler.exec(clean)) break;
+    offset = filler.lastIndex;
+  }
+  clean = clean.slice(offset).replace(/[呀啊哦呢啦吧喽]+$/, "");
+  return /^(?:(?:我|我们)?(?:已经)?(?:没(?:有)?(?:什么|啥|更多|其他|别的)?问题(?:了)?|没有(?:了)?|没了|没有想问(?:的)?(?:了)?|没想问的(?:了)?|没有要问的(?:了)?|不想问(?:了)?|问完了)|不用(?:了)?|不知道(?:问什么)?|结束(?:了)?|再见|今天到这里|全部结束|活动结束|不想继续了)$/i.test(clean);
+}
+
 const rules = [
   {
     topic: "遇水开花",
