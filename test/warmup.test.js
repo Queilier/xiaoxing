@@ -35,18 +35,21 @@ test("主试先示范后自动提示孩子，问答只访问热身接口并使�
   await vm.runInContext('ask("你喜欢什么颜色？")', p.context);
   assert.deepEqual(p.requests.map(r => r.url), ["/api/warmup", "/api/tts"]);
   const saved = JSON.parse(p.storage.get("xiaoxing-warmup-v1"));
-  assert.equal(saved.history[0].speaker, "host");
+  assert.equal(saved.history.filter(item => item.role === "user")[0].speaker, "host");
   assert.equal(saved.stage, "child");
   assert.ok(!p.storage.has("xiaoxing_experiment_data"));
   await vm.runInContext('ask("猫为什么有胡子？")', p.context);
-  assert.equal(JSON.parse(p.storage.get("xiaoxing-warmup-v1")).history[2].speaker, "child");
+  assert.equal(JSON.parse(p.storage.get("xiaoxing-warmup-v1")).history.filter(item => item.role === "user")[1].speaker, "child");
   vm.runInContext('clearAudio()', p.context);
 });
-test("正式开始只设置交接标记并进入正式页，不传递热身对话", () => {
+test("正式开始保存热身结束时间并进入正式页，AI上下文保持独立", () => {
   const p = page(); p.elements.get("formalStart").onclick();
   assert.deepEqual(p.navigation, ["/activity"]);
   assert.equal(p.storage.get("xiaoxing-warmup-handoff"), "true");
   assert.equal(p.requests.length, 0);
+  const saved = JSON.parse(p.storage.get("xiaoxing-warmup-v1"));
+  assert.ok(saved.endedAt);
+  assert.equal(saved.pageEvents.at(-1).type, "formal_start");
 });
 
 test("从热身进入正式页先备份旧记录，再准备全新的正式会话", () => {
@@ -58,7 +61,9 @@ test("从热身进入正式页先备份旧记录，再准备全新的正式会�
   const context = { loadExperimentData: () => previous, STORAGE_KEY: "formal",
     localStorage: { setItem: (k,v) => local.set(k,v) },
     sessionStorage: { getItem: k => session.get(k), removeItem: k => session.delete(k) }, console };
-  vm.createContext(context); vm.runInContext(html.slice(start,end), context);
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(new URL("../public/data-export.js", import.meta.url), "utf8"), context);
+  vm.runInContext(html.slice(start,end), context);
   assert.equal(vm.runInContext("restoredExperimentData", context), null);
   assert.equal(session.has("xiaoxing-warmup-handoff"), false);
   assert.deepEqual(JSON.parse([...local.values()][0]), previous);
@@ -72,6 +77,8 @@ test("旧记录无法备份时保留原会话，不覆盖原实验数据", () =>
   const context = { loadExperimentData: () => previous, STORAGE_KEY: "formal",
     localStorage: { setItem() { throw new Error("quota"); } },
     sessionStorage: { getItem: () => "true", removeItem() {} }, console: { warn() {} } };
-  vm.createContext(context); vm.runInContext(html.slice(start,end), context);
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(new URL("../public/data-export.js", import.meta.url), "utf8"), context);
+  vm.runInContext(html.slice(start,end), context);
   assert.equal(vm.runInContext("restoredExperimentData", context), previous);
 });

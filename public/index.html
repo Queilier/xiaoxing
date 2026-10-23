@@ -391,6 +391,7 @@
     </div>
   </div>
 
+  <script src="/data-export.js"></script>
   <script>
     const STORAGE_KEY = "xiaoxing_experimentData";
     const VIDEO_SOURCES = {
@@ -474,8 +475,10 @@
     function saveExperimentData() {
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(window.experimentData || {}));
+        return true;
       } catch (e) {
         console.error("保存 experimentData 失败：", e);
+        return false;
       }
     }
 
@@ -506,13 +509,17 @@
 
     // 从热身进入时开始独立正式会话；先备份已有实验记录，避免覆盖。
     let restoredExperimentData = loadExperimentData();
+    let incomingWarmup = null;
     try {
       if (sessionStorage.getItem("xiaoxing-warmup-handoff") === "true") {
         if (restoredExperimentData?.chatHistory?.length) {
           localStorage.setItem(STORAGE_KEY + ":archive:" + Date.now(), JSON.stringify(restoredExperimentData));
         }
         restoredExperimentData = null;
-        sessionStorage.removeItem("xiaoxing-warmup-handoff");
+        try {
+          incomingWarmup = XiaoxingData.warmupRecord(JSON.parse(sessionStorage.getItem("xiaoxing-warmup-v1") || "null"));
+        } catch (error) { console.warn("读取热身数据失败：", error); }
+        if (!incomingWarmup) sessionStorage.removeItem("xiaoxing-warmup-handoff");
       }
     } catch (error) {
       console.warn("未能准备新的正式会话，保留已有实验记录：", error);
@@ -537,6 +544,15 @@
       pageEvents: [],
       errors: [],
     };
+
+    if (incomingWarmup) {
+      window.experimentData.warmup = incomingWarmup;
+      // 正式记录保存成功后才移除临时热身记录，下一个孩子会得到新的热身会话。
+      if (saveExperimentData()) {
+        sessionStorage.removeItem("xiaoxing-warmup-v1");
+        sessionStorage.removeItem("xiaoxing-warmup-handoff");
+      }
+    }
 
     // Record page load
     recordEvent("page_load", { url: window.location.href });
@@ -660,6 +676,9 @@
       }
 
       window.experimentData.childId = participantId;
+      if (window.experimentData.warmup && !window.experimentData.warmup.childId) {
+        window.experimentData.warmup.childId = participantId;
+      }
       if (!window.experimentData.startTime) {
         window.experimentData.startTime = new Date().toISOString();
       }
@@ -1463,7 +1482,7 @@
     // Download data helper
     function downloadData() {
       try {
-        const data = window.experimentData || {};
+        const data = XiaoxingData.combinedExport(window.experimentData || {});
         const child = data.childId || "unknown_child";
         const filename = `${child}_science_exploration_data.json`;
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
