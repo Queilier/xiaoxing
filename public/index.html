@@ -504,8 +504,20 @@
       }
     }
 
-    // Initialize global experimentData from localStorage if exists
-    window.experimentData = loadExperimentData() || {
+    // 从热身进入时开始独立正式会话；先备份已有实验记录，避免覆盖。
+    let restoredExperimentData = loadExperimentData();
+    try {
+      if (sessionStorage.getItem("xiaoxing-warmup-handoff") === "true") {
+        if (restoredExperimentData?.chatHistory?.length) {
+          localStorage.setItem(STORAGE_KEY + ":archive:" + Date.now(), JSON.stringify(restoredExperimentData));
+        }
+        restoredExperimentData = null;
+        sessionStorage.removeItem("xiaoxing-warmup-handoff");
+      }
+    } catch (error) {
+      console.warn("未能准备新的正式会话，保留已有实验记录：", error);
+    }
+    window.experimentData = restoredExperimentData || {
       childId: null,
       childName: null,
       startTime: null,

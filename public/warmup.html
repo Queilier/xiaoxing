@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>先和小星聊聊天 · 热身练习</title>
+<style>
+*{box-sizing:border-box}body{margin:0;color:#263238;font-family:Arial,"Microsoft YaHei",sans-serif;background:linear-gradient(160deg,#f0faff,#fffbee);min-height:100vh}main{max-width:960px;margin:auto;padding:30px 18px}.card{background:#fff;border:1px solid #edf2f7;border-radius:28px;padding:30px;box-shadow:0 12px 35px #2632380a}.badge{display:inline-block;border-radius:24px;background:#e6f5ff;color:#486c80;padding:8px 18px;font-size:15px}header{text-align:center}h1{font-size:32px;margin:16px 0 12px}p{line-height:1.7}.intro{color:#607d8b;margin:0 auto 20px;max-width:640px}.steps{display:flex;justify-content:center;gap:12px;flex-wrap:wrap}button,input{font:inherit}button{border:0;border-radius:999px;padding:13px 23px;color:inherit;background:#e6f5ff;cursor:pointer;min-height:48px}button:focus-visible,input:focus-visible{outline:3px solid #488cc0;outline-offset:3px}button:disabled{opacity:.55;cursor:wait}.step{font-size:15px}.step[aria-pressed=true]{background:#dff3df;box-shadow:inset 0 0 0 2px #a8d5a8}.chat{height:clamp(260px,40vh,440px);overflow:auto;border:1px solid #e9eff5;border-radius:22px;background:#fbfdff;padding:20px;margin:22px 0;display:flex;flex-direction:column;gap:18px}.message{max-width:82%;padding:14px 18px;line-height:1.65;font-size:19px;white-space:pre-wrap;overflow-wrap:anywhere;border-radius:22px;background:#fff5d9;align-self:flex-start}.message.user{align-self:flex-end;background:#e5f5ff}.speaker{display:block;font-size:12px;color:#68818d;margin-bottom:5px}.controls{display:flex;gap:10px}.controls input{min-width:0;flex:1;border:1px solid #d8e2ea;border-radius:999px;padding:12px 18px;font-size:17px}.voice{background:#fff0bf;touch-action:none;user-select:none;-webkit-user-select:none}.status{text-align:center;color:#607d8b;font-size:15px;min-height:26px;margin:16px 0 8px}.replay{text-align:center;min-height:45px}.replay button{background:#fff3cd;padding:9px 20px;font-size:15px}footer{margin-top:22px;padding-top:22px;border-top:1px solid #eef2f5;text-align:center}.start{background:#dff3df;font-size:21px;min-width:250px;padding:16px 32px}footer p{color:#6d818c;font-size:14px;margin:12px 0 0}.practice-note{font-size:14px;color:#6d818c;margin:14px 0 0}.voice.recording{background:#ffd8a8}@media(max-width:600px){main{padding:16px 10px}.card{padding:22px 14px}h1{font-size:27px}.controls{flex-wrap:wrap}.controls input{flex-basis:100%}.controls button{flex:1}.message{max-width:94%;font-size:18px}.start{width:100%}}
+</style>
+</head>
+<body><main><section class="card">
+<header><span class="badge">热身练习</span><h1>先和小星聊聊天</h1><p class="intro">先请大人示范问一个问题，再轮到小朋友试一试。<br>想聊什么都可以，慢慢来，我们先熟悉一下按钮。</p>
+<div class="steps" aria-label="练习步骤"><button class="step" id="hostStep" aria-pressed="true">① 主试先示范</button><button class="step" id="childStep" aria-pressed="false">② 小朋友试一试</button></div>
+<p class="practice-note">按住“按住说话”，说完后松开。也可以打字，再点“发送”。</p></header>
+<div id="chat" class="chat" role="log" aria-label="热身聊天记录" aria-live="polite"></div>
+<form id="questionForm" class="controls"><input id="question" aria-label="输入热身问题" maxlength="1000" placeholder="也可以在这里输入想问的问题…" autocomplete="off"><button id="hold" class="voice" type="button">按住说话</button><button id="send" type="submit">发送</button></form>
+<p id="status" class="status" role="status">先请主试示范提问，再让小朋友自由提问。</p><div class="replay"><button id="replay" hidden type="button">再听一次小星的话</button></div>
+<footer><button id="formalStart" class="start" type="button">正式开始 →</button><p>熟悉操作后点击这里，进入科学视频与正式探索。</p></footer>
+</section></main><script type="module" src="/warmup.js"></script></body></html>

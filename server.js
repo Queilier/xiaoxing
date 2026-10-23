@@ -7,6 +7,7 @@ import { fileURLToPath } from "url";
 import { execFileSync } from "node:child_process";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import { synthesizeDoubaoSpeech } from "./doubao-tts.js";
+import { buildWarmupMessages } from "./warmup-chat.js";
 import { normalizeText, isReady, isNoQuestion, chooseTopic, extractTopicWithCorrection } from "./conversation-intents.js";
 
 dotenv.config();
@@ -361,6 +362,25 @@ async function handleExperimentFlow(state, userText, userId, chatHistory = []) {
 
 // ─── API ROUTES ───────────────────────────────────────────────────────────────
 
+app.post("/api/warmup", async (req, res) => {
+  const question = req.body?.question;
+  if (typeof question !== "string" || !question.trim() || question.length > 1000) {
+    return res.status(400).json({ error: "请说一个问题，或者在输入框里输入问题。" });
+  }
+  if (!openai) return res.status(503).json({ error: "请在服务端配置 OPENAI_API_KEY。" });
+  try {
+    const completion = await openai.chat.completions.create({
+      model: OPENAI_CHAT_MODEL,
+      messages: buildWarmupMessages(question.trim(), req.body.history),
+    }, { timeout: 40000, maxRetries: 0 });
+    const reply = completion.choices?.[0]?.message?.content?.trim();
+    if (!reply) throw new Error("小星暂时没有回复，请再试一次。");
+    res.json({ reply });
+  } catch (error) {
+    res.status(502).json({ error: openAIErrorMessage(error, "热身聊天暂时出错，请重试。") });
+  }
+});
+
 app.post("/api/chat", async (req, res) => {
   try {
     const { childId, currentTopic, userQuestion, conversationHistory, state } = req.body;
@@ -444,7 +464,9 @@ app.post(
         file: await toFile(req.body, `child-question.${extension}`, { type: contentType }),
         model: OPENAI_TRANSCRIPTION_MODEL,
         languages: ["zh-cn"],
-        prompt: "这是 5 到 6 岁儿童关于科学视频的中文对话。主题词包括：遇水开花、牙签五角星。请准确转写听到的原话，不要补充内容。",
+        prompt: req.query.mode === "warmup"
+          ? "这是主试和5到6岁儿童与小星进行自由聊天的中文录音。请准确转写听到的原话，不要补充内容。"
+          : "这是 5 到 6 岁儿童关于科学视频的中文对话。主题词包括：遇水开花、牙签五角星。请准确转写听到的原话，不要补充内容。",
         response_format: "json",
       });
 
@@ -516,6 +538,12 @@ app.use("/api", (req, res) => {
   });
 });
 
+app.get(["/", "/warmup", "/warmup.html"], (req, res) => {
+  res.sendFile(path.join(publicPath, "warmup.html"));
+});
+app.get("/activity", (req, res) => {
+  res.sendFile(path.join(publicPath, "index.html"));
+});
 app.use(express.static(publicPath));
 
 app.get("*", (req, res) => {

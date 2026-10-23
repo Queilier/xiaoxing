@@ -8,6 +8,8 @@
 2. 执行 `npm install` 和 `npm start`。
 3. 打开 http://localhost:3000 。
 
+网站首页是热身页。点击“正式开始”进入 `/activity`；主试也可以直接打开 `/activity` 进入原有正式流程。热身共用现有 OpenAI 识别与豆包配音配置，无需新增密钥。
+
 可选环境变量：
 
 - `TTS_PROVIDER`：`doubao` 使用邻家女孩 2.0；`openai` 使用 OpenAI 配音。没有设置时兼容原配置，使用 OpenAI。
