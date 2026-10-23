@@ -6,8 +6,18 @@ export function normalizeText(text = "") {
 
 // 仅在等待准备确认的阶段调用，不能把否定或疑问句当作同意。
 export function isReady(text = "") {
-  const clean = normalizeText(text).replace(/[\s~～]/g, "");
-  return /^(?:(?:我|我们)?(?:已经|都)?准备好(?:了|啦|呀|啊|喽|咯)?|好(?:了|啦|的|呀|啊|吧)?|(?:我)?可以(?:了|啦|呀|啊|吧|开始(?:了|啦)?)?|行(?:了|啦|呀|啊)?|没问题|(?:我们)?开始(?:吧|啦|了)?|嗯(?:嗯|哼)?|ready|yes|ok)$/i.test(clean);
+  const clean = normalizeText(text).replace(/[\s~～“”‘’"']/g, "");
+  // 肯定表达可以自然组合：“嗯，准备好了”“好的，我准备好了，开始吧”。
+  // 整句必须全部由肯定表达组成，不能只因含有“准备好”就跳过否定或疑问。
+  const affirmative = /(?:(?:我|我们)?(?:已经|都)?准备好(?:了|啦)?(?:呀|啊|喽|咯|哦)?|好(?:了|啦|的|嘞|哒)?(?:呀|啊|吧|哦)?|(?:我)?可以(?:了|啦|呀|啊|吧|开始(?:了|啦)?)?|行(?:了|啦|呀|啊)?|没问题|(?:我们)?开始(?:吧|啦|了)?|嗯(?:嗯|哼)?|对(?:的)?|是的|ready|yes|ok)/iy;
+  if (!clean) return false;
+  let offset = 0;
+  while (offset < clean.length) {
+    affirmative.lastIndex = offset;
+    if (!affirmative.exec(clean)) return false;
+    offset = affirmative.lastIndex;
+  }
+  return true;
 }
 
 const rules = [
