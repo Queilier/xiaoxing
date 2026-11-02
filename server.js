@@ -1,4 +1,5 @@
 import express from "express";
+import { installCloudRecording } from "./cloud-recording.js";
 import OpenAI, { toFile } from "openai";
 import dotenv from "dotenv";
 import path from "path";
@@ -20,6 +21,8 @@ const promptsPath = path.join(__dirname, "prompts");
 const app = express();
 const port = process.env.PORT || 3000;
 
+app.use("/api/recording/session", express.json());
+installCloudRecording(app);
 app.use(express.json());
 
 function getOpenAIProxy() {
