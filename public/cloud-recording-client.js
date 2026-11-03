@@ -20,7 +20,7 @@
   }
   const guided = location.pathname === '/' || location.pathname === '/guidance.html';
   const nativeFetch = window.fetch.bind(window);
-  let current = null, active = false, finishing = false, uploading = false, pending = 0, writes = Promise.resolve();
+  let current = null, active = false, finishing = false, uploading = false, pending = 0, finishRequested = false, writes = Promise.resolve();
   const db = new Promise((resolve, reject) => {
     const request = indexedDB.open('xiaoxing-conversation-json', 1);
     request.onupgradeneeded = () => request.result.createObjectStore('sessions', { keyPath: 'id' });
@@ -81,7 +81,7 @@
         if (!response.ok) throw new Error('云端上传失败');
         await store('readwrite', s => s.delete(row.id));
       }
-      if (rows.some(r => r.ready)) { say('完整 JSON 已保存到云端，可以关闭页面。'); showThanks(); }
+      if (rows.some(r => r.ready)) { say('完整 JSON 已保存到云端，可以关闭页面。'); if (finishRequested) showThanks(); }
     } catch { say('JSON 尚未上传完成，已保留在本机，将自动重试。请保持页面打开。'); }
     finally { uploading = false; }
   }
@@ -136,6 +136,11 @@
   }
 
   start.onclick = async () => {
+    if (guided && current && !current.ready) {
+      active = true; start.disabled = true;
+      showFrame(current.document.events.some(e => e.kind === 'formal_activity_open') ? '/activity' : '/warmup');
+      return;
+    }
     start.disabled = true;
     try {
       if (!input.value.trim()) throw new Error('请先填写家庭/被试编号');
@@ -151,7 +156,7 @@
   };
   stop.onclick = async () => {
     if (!active) return;
-    active = false; finishing = true; stop.disabled = true;
+    finishRequested = true; active = false; finishing = true; stop.disabled = true;
     if (guided) { panel.hidden = false; input.hidden = true; start.hidden = true; stop.hidden = true; const frame = document.getElementById('formal-activity-frame'); if (frame) frame.style.display = 'none'; }
     say('正在等待已发送的 AI 请求完成，并整理完整 JSON…');
     try {
@@ -171,7 +176,12 @@
       if (drafts.length) {
         current = drafts.at(-1); active = true; start.disabled = true; stop.disabled = false; input.disabled = true; input.value = current.document.participant;
         say('已恢复本机未结束的文字记录，可继续活动或点击结束保存。');
-        if (guided) showFrame(current.document.events.some(e => e.kind === 'formal_activity_open') ? '/activity' : '/warmup');
+        if (guided) {
+          // Always keep the instructions visible on entry; resume only on an explicit click.
+          active = false; start.disabled = false;
+          start.textContent = '同意并继续上次活动 →';
+          say('发现本机未结束的记录。请先阅读指导语，再点击按钮继续上次活动。');
+        }
       } else await flush();
     } catch { say('无法打开本地存储，请检查浏览器设置。'); }
   }
