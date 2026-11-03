@@ -138,7 +138,7 @@
   start.onclick = async () => {
     if (guided && current && !current.ready) {
       active = true; start.disabled = true;
-      showFrame(current.document.events.some(e => e.kind === 'formal_activity_open') ? '/activity' : '/warmup');
+      showFrame('/warmup');
       return;
     }
     start.disabled = true;
@@ -179,8 +179,8 @@
         if (guided) {
           // Always keep the instructions visible on entry; resume only on an explicit click.
           active = false; start.disabled = false;
-          start.textContent = '同意并继续上次活动 →';
-          say('发现本机未结束的记录。请先阅读指导语，再点击按钮继续上次活动。');
+          start.textContent = '同意并进入热身 →';
+          say('发现本机未结束的记录。已有文字会保留，阅读指导语后点击按钮进入热身。');
         }
       } else await flush();
     } catch { say('无法打开本地存储，请检查浏览器设置。'); }
