@@ -541,7 +541,11 @@ app.use("/api", (req, res) => {
   });
 });
 
-app.get(["/", "/warmup", "/warmup.html"], (req, res) => {
+app.get("/", (req, res) => {
+  res.sendFile(path.join(publicPath, "guidance.html"));
+});
+
+app.get(["/warmup", "/warmup.html"], (req, res) => {
   res.sendFile(path.join(publicPath, "warmup.html"));
 });
 app.get("/activity", (req, res) => {

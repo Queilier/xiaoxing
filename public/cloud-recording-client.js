@@ -1,155 +1,180 @@
 (() => {
-  // The same-origin formal activity shares the host's recorder and upload queue.
-  // Keep the host document alive so MediaRecorder does not stop during handoff.
   if (window.parent !== window) {
     try {
       if (window.parent.location.origin === location.origin && window.parent.XiaoxingRecording) {
-        window.fetch = (input, options) => window.parent.XiaoxingRecording.fetch(input, options);
+        const host = window.parent.XiaoxingRecording;
+        window.fetch = (input, options) => host.fetch(input, options, location.pathname);
+        window.XiaoxingRecording = { openActivity: () => host.openActivity() };
+        if (location.pathname === '/activity') {
+          const participant = document.getElementById('participantId');
+          if (participant) { participant.value = host.participant(); participant.readOnly = true; participant.closest('.participant-area').hidden = true; }
+          const download = document.getElementById('downloadDataBtn'); if (download) download.hidden = true;
+          const finish = document.createElement('button'); finish.type = 'button'; finish.textContent = '结束今天的互动';
+          finish.style.cssText = 'display:block;margin:28px auto;padding:16px 30px;background:#dff3df;font-size:20px;border:0;border-radius:20px;cursor:pointer';
+          finish.onclick = () => host.finish(); document.body.append(finish);
+          const status = document.getElementById('status'); if (status) status.textContent = '家庭 ID 已填写，点击“开始探索”开始正式互动。';
+        }
         return;
       }
-    } catch { /* Standalone embedded pages retain their own controls. */ }
+    } catch {}
   }
-  const originalFetch = window.fetch.bind(window);
-  let token = sessionStorage.getItem('cloud-recording-token'), active = false, recorder, stream, timer, flushing = false, finalizing = false, pending = 0, writes = Promise.resolve();
-  const dbPromise = new Promise((resolve, reject) => {
-    const req = indexedDB.open('xiaoxing-recording-queue', 1);
-    req.onupgradeneeded = () => req.result.createObjectStore('uploads', { keyPath: 'id' });
-    req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error);
+  const guided = location.pathname === '/' || location.pathname === '/guidance.html';
+  const nativeFetch = window.fetch.bind(window);
+  let current = null, active = false, finishing = false, uploading = false, pending = 0, writes = Promise.resolve();
+  const db = new Promise((resolve, reject) => {
+    const request = indexedDB.open('xiaoxing-conversation-json', 1);
+    request.onupgradeneeded = () => request.result.createObjectStore('sessions', { keyPath: 'id' });
+    request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
   });
-  async function transaction(mode, run) {
-    const db = await dbPromise;
+  async function store(mode, action) {
+    const database = await db;
     return new Promise((resolve, reject) => {
-      const tx = db.transaction('uploads', mode); const request = run(tx.objectStore('uploads'));
-      tx.oncomplete = () => resolve(request.result); tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error);
+      const tx = database.transaction('sessions', mode), request = action(tx.objectStore('sessions'));
+      tx.oncomplete = () => resolve(request.result); tx.onerror = tx.onabort = () => reject(tx.error);
     });
   }
   const panel = document.createElement('section');
   panel.style.cssText = 'padding:16px;margin:12px;border:1px solid #ccd;border-radius:12px;background:white;color:#263238;font:14px sans-serif';
-  panel.innerHTML = '<p>经家长同意后，将记录现场声音、语音输入、转写文字和 AI 回复，先暂存于本机，点击停止后整份上传至研究者的私有云端存储。停止记录后将不再收集。请保持本页打开；切换页面或锁屏可能中断录音。关闭网页前请等待上传完成。</p><label>家庭/被试编号 <input aria-label="记录家庭编号" maxlength="80"></label> <button type="button">同意并开始记录</button> <button type="button" disabled>停止记录</button><p role="status"></p>';
+  panel.innerHTML = '<p>经家长同意后，记录热身及正式活动的文字输入、语音转写、AI 回复和时间。活动结束点击“结束并保存记录”，整份 JSON 自动上传到研究者的私有云端。本功能不保存录音或 AI 音频。请等待上传完成后再关闭页面。</p><label>家庭/被试编号 <input aria-label="记录家庭编号" maxlength="80"></label> <button type="button">同意并开始记录</button> <button type="button" disabled>结束并保存记录</button><p role="status"></p>';
   document.body.prepend(panel);
-  const [start, stop] = panel.querySelectorAll('button'); const status = panel.querySelector('[role=status]');
-  const say = text => status.textContent = text;
-  async function flush() {
-    if (flushing || active || finalizing || !sessionStorage.getItem('recording-upload-ready')) return;
-    flushing = true;
-    try {
-      const rows = await transaction('readonly', s => s.getAll());
-      const groups = new Map();
-      for (const row of rows) { if (!groups.has(row.token)) groups.set(row.token, []); groups.get(row.token).push(row); }
-      for (const [sessionToken, group] of groups) {
-        const events = [], files = [], ambient = [];
-        for (const row of group) {
-          if (row.ext === 'json') events.push(JSON.parse(await row.body.text()));
-          else if (row.ambient) ambient.push(row);
-          else files.push({ name: row.id + '.' + row.ext, body: row.body });
-        }
-        events.sort((a,b) => a.at.localeCompare(b.at));
-        ambient.sort((a,b) => a.sequence - b.sequence);
-        const fullAudio = ambient.length ? 'recording.' + ambient[0].ext : null;
-        if (fullAudio) files.push({ name: fullAudio, body: new Blob(ambient.map(r => r.body), { type: ambient[0].type }) });
-        files.push({ name: 'records.json', body: new Blob([JSON.stringify({ participant: events[0]?.participant, audio: fullAudio, events }, null, 2)]) });
-        const archive = await window.makeRecordingZip(files);
-        if (archive.size > 49 * 1024 * 1024) throw new Error('本次记录超过 49MB，请联系研究者调整存储容量；数据仍在本机');
-        say('录制已停止，正在上传整份记录，请勿关闭页面…');
-        const response = await originalFetch('/api/recording/upload', { method: 'POST', headers: { 'Content-Type': 'application/zip', 'X-Recording-Session': sessionToken, 'X-Recording-File': sessionToken.split('.')[0] + '.zip' }, body: archive, signal: AbortSignal.timeout(180000) });
-        if (!response.ok) throw new Error('整份记录上传失败，将自动重试');
-        for (const row of group) await transaction('readwrite', store => store.delete(row.id));
-      }
-      say(active ? '正在记录；当前记录已上传' : '当前待上传记录已全部保存');
-    } catch (error) { say(error.message + '。请保持本页打开。'); }
-    finally { flushing = false; }
+  const [start, stop] = panel.querySelectorAll('button'), input = panel.querySelector('input'), status = panel.querySelector('[role=status]');
+  if (guided) {
+    panel.style.cssText += ';max-width:860px;margin:16px auto 40px';
+    panel.querySelector('p').hidden = true;
+    panel.querySelector('label').firstChild.textContent = '家庭 ID ';
+    start.textContent = '同意并进入热身 →'; stop.hidden = true;
+    document.getElementById('guidance').after(panel);
   }
-  async function queue(body, type, ext, sessionToken = token, extra = {}) {
-    try {
-      const id = crypto.randomUUID();
-      writes = writes.then(() => transaction('readwrite', s => s.put({ id, token: sessionToken, body, type, ext, ...extra })));
-      await writes;
-      void flush();
-      return id + '.' + ext;
-    } catch { say('本地暂存失败，请停止记录并检查设备存储空间。'); stop.click(); }
-  }
-  const event = (data, sessionToken = token) => queue(new Blob([JSON.stringify({ ...data, at: new Date().toISOString(), page: location.pathname, participant: panel.querySelector('input').value })]), 'application/json', 'json', sessionToken);
-  window.fetch = async function(input, options = {}) {
-    const path = new URL(typeof input === 'string' ? input : input.url, location.href).pathname;
-    const capture = active && ['/api/chat', '/api/warmup', '/api/transcribe', '/api/tts'].includes(path);
-    const sessionToken = token, requestId = crypto.randomUUID();
-    if (capture) pending++;
-    if (capture) {
-      if (Object.prototype.toString.call(options.body) === '[object Blob]') {
-        const mime = options.body.type.split(';')[0];
-        const ext = ({ 'audio/mp4': 'mp4', 'audio/mpeg': 'mp3', 'audio/wav': 'wav' })[mime] || 'webm';
-        const file = await queue(options.body, mime, ext, sessionToken);
-        await event({ kind: 'voice_input', requestId, path, file }, sessionToken);
-      } else await event({ kind: 'request', requestId, path, body: options.body }, sessionToken);
+  function showThanks() {
+    if (!guided) return;
+    document.getElementById('formal-activity-frame')?.remove();
+    document.getElementById('guidance').hidden = true;
+    panel.hidden = true;
+    let thanks = document.getElementById('thanks');
+    if (!thanks) {
+      thanks = document.createElement('main'); thanks.id = 'thanks';
+      thanks.style.textAlign = 'center';
+      thanks.innerHTML = '<h1>今天的亲子互动到这里结束了，感谢孩子和家长的参与！</h1><p>可以结束录音了。</p>';
+      document.body.append(thanks);
     }
+    window.scrollTo(0, 0);
+  }
+  const say = text => { status.textContent = text; };
+  function persist() {
+    const snapshot = structuredClone(current);
+    writes = writes.catch(() => {}).then(() => store('readwrite', s => s.put(snapshot)));
+    return writes;
+  }
+  async function record(data) {
+    if (!current) return;
+    current.document.events.push({ ...data, at: new Date().toISOString() });
+    try { await persist(); } catch { say('本地保存失败，请勿关闭页面，请检查设备存储空间。'); }
+  }
+  async function flush() {
+    if (active || finishing || uploading) return;
+    uploading = true;
     try {
-      const response = await originalFetch(input, options);
+      const rows = await store('readonly', s => s.getAll());
+      for (const row of rows.filter(r => r.ready)) {
+        say('正在上传完整 JSON，请勿关闭页面…');
+        const response = await nativeFetch('/api/recording/upload', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Recording-Session': row.token, 'X-Recording-File': row.id + '.json' }, body: JSON.stringify(row.document, null, 2), signal: AbortSignal.timeout(60000) });
+        if (!response.ok) throw new Error('云端上传失败');
+        await store('readwrite', s => s.delete(row.id));
+      }
+      if (rows.some(r => r.ready)) { say('完整 JSON 已保存到云端，可以关闭页面。'); showThanks(); }
+    } catch { say('JSON 尚未上传完成，已保留在本机，将自动重试。请保持页面打开。'); }
+    finally { uploading = false; }
+  }
+  async function captureFetch(resource, options = {}, page = location.pathname) {
+    const path = new URL(typeof resource === 'string' ? resource : resource.url, location.href).pathname;
+    const capture = active && ['/api/chat', '/api/warmup', '/api/transcribe', '/api/tts'].includes(path);
+    const requestId = crypto.randomUUID();
+    if (capture) pending++;
+    try {
       if (capture) {
-        const copy = response.clone();
-        if (copy.headers.get('Content-Type')?.startsWith('audio/')) {
-          const file = await queue(await copy.blob(), 'audio/mpeg', 'mp3', sessionToken);
-          await event({ kind: 'ai_audio_generated', requestId, path, file }, sessionToken);
-        } else await event({ kind: 'response', requestId, path, status: response.status, body: await copy.text() }, sessionToken);
+        let body = null;
+        if (typeof options.body === 'string') { try { body = JSON.parse(options.body); } catch { body = options.body; } }
+        await record({ kind: 'request', requestId, path, page, body, inputType: path === '/api/transcribe' ? 'voice' : 'text_or_control' });
+      }
+      const response = await nativeFetch(resource, options);
+      if (capture) {
+        if (response.headers.get('Content-Type')?.startsWith('audio/')) {
+          await record({ kind: 'ai_audio_generated', requestId, page, status: response.status, audioSaved: false });
+        } else {
+          const text = await response.clone().text(); let body;
+          try { body = JSON.parse(text); } catch { body = text; }
+          await record({ kind: 'response', requestId, path, page, status: response.status, body });
+        }
       }
       return response;
-    } catch (error) { if (capture) await event({ kind: 'request_error', requestId, path, message: error.message }, sessionToken); throw error; } finally { if (capture) pending--; }
-  };
+    } catch (error) {
+      if (capture) await record({ kind: 'request_error', requestId, path, page, message: error.message });
+      throw error;
+    } finally { if (capture) pending--; }
+  }
+  window.fetch = captureFetch;
   window.XiaoxingRecording = {
-    fetch: (...args) => window.fetch(...args),
+    fetch: captureFetch,
+    participant: () => current?.document.participant || '',
+    finish: () => stop.click(),
     openActivity() {
-      if (document.getElementById('formal-activity-frame')) return;
-      void event({ kind: 'formal_activity_open' });
-      document.querySelector('main')?.setAttribute('hidden', '');
-      const frame = document.createElement('iframe');
-      frame.id = 'formal-activity-frame';
-      frame.title = '正式科学探索活动';
-      frame.allow = 'microphone; autoplay; fullscreen';
-      frame.style.cssText = 'display:block;width:100%;height:100vh;border:0';
-      frame.src = '/activity';
-      panel.after(frame);
-      panel.querySelector('p').textContent = '热身与正式活动共用本次记录。录制继续进行，无需再次填写编号或开始。全部活动结束后点击“停止记录”，并等待上传完成。';
-      window.scrollTo(0, 0);
+      if (active) void record({ kind: 'formal_activity_open', page: '/activity' });
+      showFrame('/activity');
     }
   };
+  function showFrame(path) {
+    document.querySelector('main')?.setAttribute('hidden', '');
+    panel.hidden = true;
+    let frame = document.getElementById('formal-activity-frame');
+    if (!frame) {
+      frame = document.createElement('iframe'); frame.id = 'formal-activity-frame';
+      frame.allow = 'microphone; autoplay; fullscreen';
+      frame.style.cssText = 'display:block;width:100%;height:100vh;border:0'; panel.after(frame);
+    }
+    frame.title = path === '/activity' ? '正式科学探索活动' : '热身练习';
+    frame.src = path; window.scrollTo(0, 0);
+  }
+
   start.onclick = async () => {
     start.disabled = true;
-    sessionStorage.removeItem('recording-upload-ready');
     try {
-      if (!panel.querySelector('input').value.trim()) throw new Error('请先填写家庭/被试编号');
-      const config = await (await originalFetch('/api/recording/config')).json();
-      if (!config.enabled) throw new Error('云端存储尚未配置，请联系研究者');
-      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false } });
-      const response = await originalFetch('/api/recording/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ consent: true }) });
-      const data = await response.json(); if (!response.ok) throw new Error(data.error);
-      token = data.token; sessionStorage.setItem('cloud-recording-token', token); active = true; stop.disabled = false;
-      panel.querySelector('input').disabled = true;
-      await event({ kind: 'recording_start' });
-      const mimeType = ['audio/webm;codecs=opus', 'audio/mp4'].find(t => MediaRecorder.isTypeSupported(t));
-      recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-      let sequence = 0;
-      recorder.ondataavailable = e => { if (e.data.size) void queue(e.data, recorder.mimeType, recorder.mimeType.includes('mp4') ? 'mp4' : 'webm', token, { ambient: true, sequence: sequence++ }); };
-      recorder.onstop = async () => {
-        stream?.getTracks().forEach(t => t.stop());
-        await event({ kind: 'recording_stop' });
-        while (pending) await new Promise(resolve => setTimeout(resolve, 100));
-        await writes;
-        finalizing = false;
-        sessionStorage.setItem('recording-upload-ready', 'true');
-        await flush();
-        start.disabled = false; panel.querySelector('input').disabled = false;
-      };
-      recorder.onerror = () => { say('现场录音中断，正在整理已记录内容'); stop.click(); };
-      recorder.start(10000);
-      say('正在录制，数据暂存在本机；点击停止后统一上传');
-    } catch (error) { active = false; stream?.getTracks().forEach(t => t.stop()); start.disabled = false; stop.disabled = true; panel.querySelector('input').disabled = false; say(error.message); }
+      if (!input.value.trim()) throw new Error('请先填写家庭/被试编号');
+      const response = await nativeFetch('/api/recording/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ consent: true }) });
+      const data = await response.json(); if (!response.ok) throw new Error(data.error || '无法开始记录');
+      current = { id: data.token.split('.')[0], token: data.token, ready: false, document: { schemaVersion: 2, participant: input.value.trim(), consentAt: new Date().toISOString(), startedAt: new Date().toISOString(), endedAt: null, audioSaved: false, events: [] } };
+      await persist();
+      if (guided) { sessionStorage.removeItem('xiaoxing-warmup-v1'); sessionStorage.removeItem('xiaoxing-warmup-handoff'); }
+      active = true; input.disabled = true; stop.disabled = false;
+      await record({ kind: 'session_start', page: location.pathname }); say('正在记录文字对话；热身与正式活动共用一份 JSON。');
+      if (guided) showFrame('/warmup');
+    } catch (error) { start.disabled = false; say(error.message); }
   };
-  stop.onclick = () => {
+  stop.onclick = async () => {
     if (!active) return;
-    finalizing = true; active = false; stop.disabled = true;
-    say('已停止，正在整理完整录音和对话…');
-    if (recorder?.state === 'recording') recorder.stop();
+    active = false; finishing = true; stop.disabled = true;
+    if (guided) { panel.hidden = false; input.hidden = true; start.hidden = true; stop.hidden = true; const frame = document.getElementById('formal-activity-frame'); if (frame) frame.style.display = 'none'; }
+    say('正在等待已发送的 AI 请求完成，并整理完整 JSON…');
+    try {
+      while (pending) await new Promise(resolve => setTimeout(resolve, 100));
+      const activity = document.getElementById('formal-activity-frame')?.contentWindow || window;
+      current.document.experimentData = activity.experimentData ? structuredClone(activity.experimentData) : null;
+      try { current.document.warmup = JSON.parse(sessionStorage.getItem('xiaoxing-warmup-v1') || 'null'); } catch {}
+      current.document.endedAt = new Date().toISOString(); current.ready = true;
+      await record({ kind: 'session_end', page: activity.location.pathname }); await writes;
+      finishing = false; await flush(); start.disabled = false; input.disabled = false;
+    } catch { finishing = false; active = true; stop.disabled = false; stop.hidden = false; say('整理失败，请再次点击结束保存；请勿关闭页面。'); }
   };
-  window.addEventListener('beforeunload', e => { if (active || finalizing || flushing) { e.preventDefault(); e.returnValue = ''; } });
-  window.addEventListener('online', flush); setInterval(flush, 15000); /* Pending interrupted sessions upload only after an explicit stop. */
-  document.addEventListener('visibilitychange', () => { if (active) void event({ kind: 'visibility', state: document.visibilityState }); });
+  async function restore() {
+    try {
+      const rows = await store('readonly', s => s.getAll());
+      const drafts = rows.filter(row => !row.ready);
+      if (drafts.length) {
+        current = drafts.at(-1); active = true; start.disabled = true; stop.disabled = false; input.disabled = true; input.value = current.document.participant;
+        say('已恢复本机未结束的文字记录，可继续活动或点击结束保存。');
+        if (guided) showFrame(current.document.events.some(e => e.kind === 'formal_activity_open') ? '/activity' : '/warmup');
+      } else await flush();
+    } catch { say('无法打开本地存储，请检查浏览器设置。'); }
+  }
+  window.addEventListener('online', flush); setInterval(flush, 15000); void restore();
+  window.addEventListener('beforeunload', e => { if (active || finishing || uploading) { e.preventDefault(); e.returnValue = ''; } });
 })();
