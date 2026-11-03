@@ -134,7 +134,8 @@ $('formalStart').onclick = () => {
   endedAt = new Date().toISOString(); recordEvent('formal_start');
   leaving = true; requestController?.abort(); held = false; stopTracks(); audio.pause();
   try { sessionStorage.setItem('xiaoxing-warmup-handoff', 'true'); } catch {}
-  window.location.assign('/activity');
+  if (window.XiaoxingRecording) window.XiaoxingRecording.openActivity();
+  else window.location.assign('/activity');
 };
 window.addEventListener('beforeunload', () => { leaving = true; held = false; stopTracks(); audio.pause(); });
 try { const saved = JSON.parse(sessionStorage.getItem(STORAGE_KEY)); if (Array.isArray(saved?.history)) { history = saved.history; stage = saved.stage === 'child' ? 'child' : 'host'; startedAt = saved.startedAt || startedAt; endedAt = saved.endedAt || null; pageEvents = saved.pageEvents || []; errors = saved.errors || []; } } catch {}

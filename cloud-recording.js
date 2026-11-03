@@ -31,13 +31,13 @@ export function installCloudRecording(app) {
       res.json({ token: `${id}.${sign(id)}` });
     } catch { res.status(503).json({ error: '无法连接云端存储' }); }
   });
-  app.post('/api/recording/upload', express.raw({ type: () => true, limit: '25mb' }), async (req, res) => {
+  app.post('/api/recording/upload', express.raw({ type: () => true, limit: '50mb' }), async (req, res) => {
     const id = session(req);
     if (!id) return res.status(401).json({ error: '记录会话无效' });
     const name = req.get('X-Recording-File') || '';
-    if (!/^[a-f0-9-]{36}\.(json|webm|mp4|mp3|wav)$/.test(name) || !Buffer.isBuffer(req.body)) return res.sendStatus(400);
+    if (!/^[a-f0-9-]{36}\.(json|webm|mp4|mp3|wav|zip)$/.test(name) || !Buffer.isBuffer(req.body)) return res.sendStatus(400);
     const type = req.get('Content-Type') || '';
-    if (!/^(audio\/|application\/json)/.test(type)) return res.sendStatus(415);
+    if (!/^(audio\/|application\/(json|zip))/.test(type)) return res.sendStatus(415);
     try { await upload(id, name, req.body, type); res.json({ saved: true }); }
     catch { res.status(503).json({ error: '云端保存失败' }); }
   });
