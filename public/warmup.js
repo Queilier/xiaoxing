@@ -1,7 +1,7 @@
 const $ = id => document.getElementById(id);
 const STORAGE_KEY = 'xiaoxing-warmup-v1';
-const welcome = '你好呀，我是小星！想问什么都可以，我们先聊聊天吧。';
-let history = [], stage = 'host', busy = false, held = false, recorder = null, stream = null;
+const welcome = '你好呀，我是小星！家长和小朋友可以随便问个问题，试试怎样和我说话。';
+let history = [], stage = 'family', busy = false, held = false, recorder = null, stream = null;
 let audioURL = '', replyToReplay = '', requestController = null, leaving = false;
 let startedAt = new Date().toISOString(), endedAt = null, pageEvents = [], errors = [];
 const audio = new Audio();
@@ -13,17 +13,10 @@ function recordEvent(type, data = {}) { pageEvents.push({ t: new Date().toISOStr
 function recordError(source, error) { errors.push({ t: new Date().toISOString(), source, message: error.message || String(error) }); save(); }
 function message(role, text, speaker) {
   const bubble = document.createElement('div'); bubble.className = 'message' + (role === 'user' ? ' user' : '');
-  if (role === 'user') { const label = document.createElement('span'); label.className = 'speaker'; label.textContent = speaker === 'host' ? '主试示范' : '小朋友'; bubble.append(label); }
+  if (role === 'user') { const label = document.createElement('span'); label.className = 'speaker'; label.textContent = '家长 / 小朋友'; bubble.append(label); }
   bubble.append(document.createTextNode(text)); $('chat').append(bubble); $('chat').scrollTop = $('chat').scrollHeight;
 }
-function setStage(value) {
-  if (stage !== value) recordEvent('speaker_change', { from: stage, to: value });
-  stage = value;
-  $('hostStep').setAttribute('aria-pressed', String(stage === 'host'));
-  $('childStep').setAttribute('aria-pressed', String(stage === 'child'));
-  save();
-}
-function setBusy(value) { busy = value; for (const id of ['send', 'hold', 'replay', 'hostStep', 'childStep']) $(id).disabled = value; }
+function setBusy(value) { busy = value; for (const id of ['send', 'hold', 'replay']) $(id).disabled = value; }
 async function request(url, options) {
   requestController = new AbortController();
   const timer = setTimeout(() => requestController.abort(), 45000);
@@ -56,8 +49,8 @@ async function playReply(text) {
   }
   catch (error) { recordError('audio_play', error); $('status').textContent = '文字回复准备好啦，点“再听一次小星的话”播放声音。'; }
 }
-audio.addEventListener('ended', () => { $('status').textContent = '轮到你啦！可以继续按住说话，或者打字提问。'; });
-audio.addEventListener('error', () => { recordError('audio_play', new Error('音频播放失败'));  $('status').textContent = '声音播放失败，可以点“再听一次”重试，或继续提问。'; });
+audio.addEventListener('ended', () => { $('status').textContent = '熟悉按钮后，可以点击最下方的“正式开始”。'; });
+audio.addEventListener('error', () => { recordError('audio_play', new Error('音频播放失败'));  $('status').textContent = '声音播放失败，可以点“再听一次”重试。'; });
 async function ask(text, via = 'text') {
   if (busy || !text.trim()) return;
   setBusy(true); clearAudio(); replyToReplay = ''; $('replay').hidden = true;
@@ -69,7 +62,6 @@ async function ask(text, via = 'text') {
     const data = await request('/api/warmup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question, history: prior }) });
     if (!data.reply) throw new Error('小星暂时没有回复，请再试一次。');
     message('assistant', data.reply); history.push({ role: 'assistant', text: data.reply, at: new Date().toISOString() }); save();
-    if (speaker === 'host') setStage('child');
     try { await playReply(data.reply); } catch (error) { recordError('tts', error); $('status').textContent = '小星已经回复，语音暂时失败：' + error.message; }
   } catch (error) {
     recordError('chat', error);
@@ -78,7 +70,6 @@ async function ask(text, via = 'text') {
   } finally { setBusy(false); }
 }
 $('questionForm').addEventListener('submit', event => { event.preventDefault(); if (!held) ask($('question').value); });
-$('hostStep').onclick = () => setStage('host'); $('childStep').onclick = () => setStage('child');
 $('replay').onclick = async () => { if (busy || !replyToReplay) return; recordEvent('audio_replay'); setBusy(true); try { await playReply(replyToReplay); } catch (error) { recordError('tts_replay', error); $('status').textContent = error.message; } finally { setBusy(false); } };
 function stopTracks() { stream?.getTracks().forEach(track => track.stop()); stream = null; }
 async function beginRecording(event) {
@@ -138,8 +129,7 @@ $('formalStart').onclick = () => {
   else window.location.assign('/activity');
 };
 window.addEventListener('beforeunload', () => { leaving = true; held = false; stopTracks(); audio.pause(); });
-try { const saved = JSON.parse(sessionStorage.getItem(STORAGE_KEY)); if (Array.isArray(saved?.history)) { history = saved.history; stage = saved.stage === 'child' ? 'child' : 'host'; startedAt = saved.startedAt || startedAt; endedAt = saved.endedAt || null; pageEvents = saved.pageEvents || []; errors = saved.errors || []; } } catch {}
+try { const saved = JSON.parse(sessionStorage.getItem(STORAGE_KEY)); if (Array.isArray(saved?.history)) { history = saved.history; stage = 'family'; startedAt = saved.startedAt || startedAt; endedAt = saved.endedAt || null; pageEvents = saved.pageEvents || []; errors = saved.errors || []; } } catch {}
 if (!history.some(item => item.source === 'greeting')) history.unshift({ role: 'assistant', text: welcome, at: startedAt, source: 'greeting' });
 for (const item of history) if (['user', 'assistant'].includes(item.role) && typeof item.text === 'string') message(item.role, item.text, item.speaker);
-setStage(stage);
 recordEvent('page_load');
