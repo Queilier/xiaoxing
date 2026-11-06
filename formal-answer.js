@@ -1,4 +1,4 @@
-export const QUESTION_FOLLOWUP = '你还有什么别的好奇的地方嘛？';
+export const QUESTION_FOLLOWUP = '你还有什么好奇的地方嘛？';
 
 export function buildFormalMessages(systemPrompt, currentTopic, question, history = []) {
   return [
