@@ -1,4 +1,5 @@
 import express from "express";
+import { buildFormalMessages, finishFormalAnswer } from "./formal-answer.js";
 import { installCloudRecording } from "./cloud-recording.js";
 import OpenAI, { toFile } from "openai";
 import dotenv from "dotenv";
@@ -117,45 +118,16 @@ function buildTopicListReply() {
   return `今天让我们一起来探索一些有趣的科学小现象吧！\n\n接下来我会分别给你播放两个科学小视频哦。每看完一个视频之后，你都可以提出任何和这个主题有关的问题。\n\n一共有两个视频主题：\n\n- 主题 1：遇水开花\n- 主题 2：牙签五角星\n\n你想先选哪个主题呢？`;
 }
 
-function formatConversationHistory(messages = []) {
-  return messages
-    .slice(-10)
-    .map((item) => `[${item.role}] ${item.text}`)
-    .join("\n");
-}
-
-function fillPromptTemplate(template, variables) {
-  return template
-    .replace(/{{\s*currentTopic\s*}}/g, variables.currentTopic || "")
-    .replace(/{{\s*userQuestion\s*}}/g, variables.userQuestion || "")
-    .replace(/{{\s*conversationHistory\s*}}/g, variables.conversationHistory || "");
-}
-
 async function callAIProvider({ currentTopic, userQuestion, conversationHistory }) {
   if (!openai) {
     throw new Error("缺少 OPENAI_API_KEY。请在 .env 或部署平台环境变量中配置 OpenAI API 密钥。");
   }
 
-  const conversationText = formatConversationHistory(conversationHistory || []);
-  const prompt = fillPromptTemplate(SCIENCE_ANSWER_PROMPT_TEMPLATE, {
-    currentTopic,
-    userQuestion,
-    conversationHistory: conversationText,
-  });
-
   const completion = await openai.chat.completions.create({
     model: OPENAI_CHAT_MODEL,
-    messages: [{ role: "system", content: prompt }],
+    messages: buildFormalMessages(SCIENCE_ANSWER_PROMPT_TEMPLATE, currentTopic, userQuestion, conversationHistory),
   });
-
-  const rawReply = completion.choices?.[0]?.message?.content;
-  if (!rawReply?.trim()) {
-    throw new Error("OpenAI 没有返回有效的文字回复。");
-  }
-
-  return rawReply
-    .replace(/\[(ADVANCE_TO_NEXT_TOPIC|END_ACTIVITY|ALL_TOPICS_DONE)\]/g, "")
-    .trim();
+  return finishFormalAnswer(completion.choices?.[0]?.message?.content);
 }
 
 // ─── FIXED RESULT CONSTANTS ─────────────────────────────────────────────────
