@@ -9,7 +9,7 @@ import { execFileSync } from "node:child_process";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import { synthesizeDoubaoSpeech } from "./doubao-tts.js";
 import { buildWarmupMessages } from "./warmup-chat.js";
-import { normalizeText, isReady, isNoQuestion, chooseTopic, extractTopicWithCorrection } from "./conversation-intents.js";
+import { normalizeText, parseName, isReady, isNoQuestion, chooseTopic, extractTopicWithCorrection } from "./conversation-intents.js";
 
 dotenv.config();
 
@@ -113,15 +113,6 @@ function chooseNextTopic(state) {
   return null;
 }
 
-function parseName(text = "") {
-  const clean = normalizeText(text);
-  const match = clean.match(/^(?:我叫|我是|叫我)?\s*(.+)$/);
-  if (match && match[1]) {
-    return match[1].replace(/[,，.!！?？]$/, "");
-  }
-  return clean || null;
-}
-
 function buildTopicListReply() {
   return `今天让我们一起来探索一些有趣的科学小现象吧！\n\n接下来我会分别给你播放两个科学小视频哦。每看完一个视频之后，你都可以提出任何和这个主题有关的问题。\n\n一共有两个视频主题：\n\n- 主题 1：遇水开花\n- 主题 2：牙签五角星\n\n你想先选哪个主题呢？`;
 }
@@ -200,7 +191,9 @@ async function handleExperimentFlow(state, userText, userId, chatHistory = []) {
     if (!text) {
       return { reply: "请告诉我你的名字哦。", nextState: state };
     }
-    state.childName = parseName(text) || text;
+    const name = parseName(userText);
+    if (!name) return { reply: "没听清你的名字，可以再告诉我一次吗？", nextState: state };
+    state.childName = name;
     state.phase = "choosing_topic";
     return {
       reply:

@@ -65,3 +65,15 @@ export function extractTopicWithCorrection(text = "") {
   const mentions = topicMentions(text);
   return mentions.at(-1)?.topic || null;
 }
+
+// Extract only a self-introduced name; keep nickname characters such as 阿/小 intact.
+export function parseName(text = "") {
+  let clean = String(text).normalize("NFKC").trim();
+  const prefix = /^(?:我的名字(?:是|叫)|我的姓名(?:是|叫)|我叫|我是|叫我)\s*/;
+  // Remove hesitation words only before an introduction or after a spoken pause.
+  clean = clean.replace(/^(?:(?:呃+|嗯+|额+|那个|你好)[\s,，。!！:：]*(?=(?:呃+|嗯+|额+|那个|你好|我的名字|我的姓名|我叫|我是|叫我))|(?:呃+|嗯+|额+|那个)[\s,，。!！:：]+)+/, "");
+  clean = clean.replace(prefix, "").trim();
+  clean = clean.replace(/^[\s,，:：“”"'‘’]+|[\s,，。.!！?？:：;；“”"'‘’~～]+$/g, "");
+  if (!clean || /^(?:呃+|嗯+|额+|那个|我叫|我是|叫我|我的名字是|我的名字叫)$/.test(clean)) return null;
+  return clean;
+}
