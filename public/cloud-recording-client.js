@@ -168,8 +168,35 @@
 <p>请家长确认：</p><label style="display:block;margin:20px 0;font-size:18px"><input type="checkbox" id="phone-recording-confirmed"> 我们已经开始录音，并确认能够清楚录下活动过程中的所有声音。</label>`
     }
   ];
-  function showConditionOneStep(index) {
-    const step = conditionOneSteps[index], main = document.getElementById('guidance');
+  const conditionTwoSteps = [
+    {
+      title: '欢迎来到科学探索！', button: '下一步',
+      content: `<p>亲爱的小朋友，欢迎你！</p>
+<p>今天，你会观看一些有趣的科学小视频，聊聊视频中的奇妙现象，还会认识一位 AI 伙伴“小星”！</p>
+<p>在接下来的探索中，你可以和小星一起提问、猜想、分享想法，探索这些有趣的科学现象。</p>
+<p>这里没有标准答案，也没有对错之分。 我们想了解的是，小朋友在探索科学问题时，会怎样交流和思考。</p>
+<p>所以，不用担心说错，也不需要提前准备。按照自己喜欢的方式，轻松、自由地聊天就好！</p>
+<p>准备好了吗？让我们一起开启今天的科学探索吧！</p>`
+    },
+    {
+      title: '我们可以怎样一起探索？', button: '我明白了，下一步',
+      content: `<p>在接下来的活动中，小朋友会和 AI 伙伴“小星”一起讨论视频中有趣的科学现象。</p>
+<p>小朋友可以自由地与小星交流！</p>
+<p>你可以根据自己的兴趣和想法，向小星提出好奇的问题、回答小星的问题，或者分享自己的猜想和发现。</p>
+<p>在这个过程中，我们希望小朋友自己与小星交流和探索。</p>
+<p>家长可以帮助孩子操作设备，例如点击按钮、发送消息等。但是，在正式互动过程中，请家长不要代替孩子向小星提问或回答问题，也不要帮助孩子思考或组织答案。</p>
+<p>即使孩子暂时不知道该问什么、该如何回答，也请尽量让孩子自己决定。</p>
+<p>这里没有标准答案，也不需要提前准备。 我们希望了解小朋友与小星交流时最自然、真实的表现，因此不需要刻意引导孩子，也不用追求正确答案。</p>`
+    },
+    {
+      ...conditionOneSteps[2],
+      content: conditionOneSteps[2].content.replace('正式探索前，你们会先进入一个简单的热身练习，熟悉接下来的操作方式。', '正式探索前，小朋友会先进入一个简单的热身练习，熟悉如何按住说话、发送消息和听取小星的回复。</p><p>家长可以在热身过程中帮助孩子熟悉这些操作。正式开始后，请尽量让孩子独立与小星交流。')
+    }
+  ];
+  const conditionNames = { '1': 'parent-ai-child', '2': 'ai-child' };
+  function showConditionStep(index) {
+    const steps = current.document.conditionCode === '2' ? conditionTwoSteps : conditionOneSteps;
+    const step = steps[index], main = document.getElementById('guidance');
     panel.hidden = true; main.hidden = false;
     main.innerHTML = '<h1></h1>' + step.content;
     main.querySelector('h1').textContent = step.title;
@@ -181,7 +208,7 @@
       if (checkbox && !checkbox.checked) return;
       button.disabled = true;
       await record({ kind: 'guidance_step_complete', step: index + 2, title: step.title, phoneRecordingConfirmed: checkbox ? true : undefined });
-      if (index < conditionOneSteps.length - 1) showConditionOneStep(index + 1);
+      if (index < steps.length - 1) showConditionStep(index + 1);
       else { current.document.phoneRecordingConfirmedAt = new Date().toISOString(); await persist(); showFrame('/warmup'); }
     };
     window.scrollTo(0, 0);
@@ -189,24 +216,26 @@
 
   start.onclick = async () => {
     if (guided && current && !current.ready) {
-      if (!current.document.participant.endsWith('1')) { say('本机旧记录不属于条件 1，请先联系研究者处理旧记录。'); return; }
-      current.document.condition = 'parent-ai-child'; current.document.conditionCode = '1';
+      const code = current.document.participant.slice(-1);
+      if (!conditionNames[code]) { say('本机旧记录不属于已开放的条件，请联系研究者处理旧记录。'); return; }
+      current.document.condition = conditionNames[code]; current.document.conditionCode = code;
       active = true; start.disabled = true;
-      showConditionOneStep(0);
+      showConditionStep(0);
       return;
     }
     start.disabled = true;
     try {
       if (!input.value.trim()) throw new Error('请先填写家庭/被试编号');
-      if (guided && !input.value.trim().endsWith('1')) throw new Error('当前仅开放家庭 ID 尾号为 1 的活动，其他条件尚未配置，请联系研究者确认。');
+      const conditionCode = input.value.trim().slice(-1);
+      if (guided && !conditionNames[conditionCode]) throw new Error('当前仅开放家庭 ID 尾号为 1 或 2 的活动，其他条件尚未配置，请联系研究者确认。');
       const response = await nativeFetch('/api/recording/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ consent: true }) });
       const data = await response.json(); if (!response.ok) throw new Error(data.error || '无法开始记录');
-      current = { id: data.token.split('.')[0], token: data.token, ready: false, document: { schemaVersion: 3, condition: 'parent-ai-child', conditionCode: '1', participant: input.value.trim(), consentAt: new Date().toISOString(), startedAt: new Date().toISOString(), endedAt: null, audioSaved: false, events: [] } };
+      current = { id: data.token.split('.')[0], token: data.token, ready: false, document: { schemaVersion: 3, condition: conditionNames[conditionCode], conditionCode, participant: input.value.trim(), consentAt: new Date().toISOString(), startedAt: new Date().toISOString(), endedAt: null, audioSaved: false, events: [] } };
       await persist();
       if (guided) { sessionStorage.removeItem('xiaoxing-warmup-v1'); sessionStorage.removeItem('xiaoxing-warmup-handoff'); }
       active = true; input.disabled = true; stop.disabled = false;
       await record({ kind: 'session_start', page: location.pathname }); say('正在记录文字对话；热身与正式活动共用一份 JSON。');
-      if (guided) showConditionOneStep(0);
+      if (guided) showConditionStep(0);
     } catch (error) { start.disabled = false; say(error.message); }
   };
   stop.onclick = async () => {
