@@ -19,6 +19,7 @@
     } catch {}
   }
   const guided = location.pathname === '/' || location.pathname === '/guidance.html';
+  const initialGuidance = guided ? document.getElementById('guidance').innerHTML : '';
   const nativeFetch = window.fetch.bind(window);
   let current = null, active = false, finishing = false, uploading = false, pending = 0, finishRequested = false, writes = Promise.resolve();
   const db = new Promise((resolve, reject) => {
@@ -42,7 +43,7 @@
     panel.style.cssText += ';max-width:860px;margin:16px auto 40px';
     panel.querySelector('p').hidden = true;
     panel.querySelector('label').firstChild.textContent = '家庭 ID ';
-    start.textContent = '同意并继续'; stop.hidden = true;
+    start.textContent = '同意并继续'; start.style.cssText = 'display:block;margin-left:auto'; stop.hidden = true;
     const consent = document.createElement('p');
     consent.textContent = '点击“同意并继续”，表示家长同意将本次网页互动产生的文字内容保存至研究者的私有云端，仅用于本次研究。网站不会保存录音文件。';
     start.before(consent);
@@ -226,9 +227,30 @@
     main.innerHTML = '<h1></h1>' + step.content;
     main.querySelector('h1').textContent = step.title;
     const button = document.createElement('button'); button.type = 'button'; button.textContent = step.button;
-    main.append(button);
+    const navigation = document.createElement('div');
+    navigation.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:16px;margin-top:28px';
+    const back = document.createElement('button'); back.type = 'button'; back.textContent = '← 上一页';
+    back.onclick = () => {
+      void record({ kind: 'guidance_back', fromStep: index + 2, toStep: index + 1 });
+      if (index > 0) showConditionStep(index - 1);
+      else {
+        main.innerHTML = initialGuidance; main.hidden = false; panel.hidden = false;
+        start.disabled = false; input.disabled = true;
+        say('家庭 ID 已保留，点击“同意并继续”进入欢迎页。');
+        window.scrollTo(0, 0);
+      }
+    };
+    navigation.append(back, button); main.append(navigation);
     const checkbox = main.querySelector('#phone-recording-confirmed');
-    if (checkbox) { button.disabled = true; checkbox.onchange = () => { button.disabled = !checkbox.checked; }; }
+    if (checkbox) {
+      checkbox.checked = Boolean(current.document.phoneRecordingAcknowledged);
+      button.disabled = !checkbox.checked;
+      checkbox.onchange = () => {
+        button.disabled = !checkbox.checked;
+        current.document.phoneRecordingAcknowledged = checkbox.checked;
+        void record({ kind: 'recording_confirmation_changed', confirmed: checkbox.checked });
+      };
+    }
     button.onclick = async () => {
       if (checkbox && !checkbox.checked) return;
       button.disabled = true;
