@@ -332,8 +332,8 @@
       <div id="videoPlaceholder" class="video-placeholder">请先在右侧点击“开始探索”，然后选择一个科学主题。</div>
       <video id="topicVideo" class="video-frame" controls playsinline preload="metadata" hidden></video>
       <div class="video-topics" aria-label="选择视频主题">
-        <button class="video-topic-button" data-topic="遇水开花" onclick="selectVideoTopic('遇水开花')">遇水开花</button>
-        <button class="video-topic-button" data-topic="牙签五角星" onclick="selectVideoTopic('牙签五角星')">牙签五角星</button>
+        <button class="video-topic-button" data-topic="戳不破的泡泡" onclick="selectVideoTopic('戳不破的泡泡')">戳不破的泡泡</button>
+        <button class="video-topic-button" data-topic="烟雾瀑布" onclick="selectVideoTopic('烟雾瀑布')">烟雾瀑布</button>
       </div>
       <button id="replayVideoButton" class="video-topic-button" onclick="replayTopicVideo()" disabled>从头重播视频</button>
     </section>
@@ -395,8 +395,8 @@
   <script>
     const STORAGE_KEY = "xiaoxing_experimentData";
     const VIDEO_SOURCES = {
-      "遇水开花": "/videos/遇水开花.MP4",
-      "牙签五角星": "/videos/牙签五角星.mov",
+      "戳不破的泡泡": "/videos/戳不破的泡泡.mp4",
+      "烟雾瀑布": "/videos/烟雾瀑布.mp4",
     };
 
     function selectVideoTopic(topic) {

@@ -3,8 +3,8 @@
   const content = document.getElementById('content'), status = document.getElementById('status');
   if (!host || host.condition() !== '3') { content.textContent = '请从网站首页输入家庭 ID 后进入活动。'; return; }
   const phase = new URLSearchParams(location.search).get('phase');
-  const topics = ['遇水开花', '牙签五角星'];
-  const sources = { '遇水开花': '/videos/遇水开花.MP4', '牙签五角星': '/videos/牙签五角星.mov' };
+  const topics = ['戳不破的泡泡', '烟雾瀑布'];
+  const sources = { '戳不破的泡泡': '/videos/戳不破的泡泡.mp4', '烟雾瀑布': '/videos/烟雾瀑布.mp4' };
   window.experimentData = { condition: 'parent-child', participant: host.participant(), events: [], completedTopics: [] };
   const log = (type, data = {}) => {
     const event = { kind: type, page: '/parent-child.html', phase, ...data };
