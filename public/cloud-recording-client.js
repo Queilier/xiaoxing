@@ -42,7 +42,10 @@
     panel.style.cssText += ';max-width:860px;margin:16px auto 40px';
     panel.querySelector('p').hidden = true;
     panel.querySelector('label').firstChild.textContent = '家庭 ID ';
-    start.textContent = '同意并进入热身 →'; stop.hidden = true;
+    start.textContent = '同意并继续'; stop.hidden = true;
+    const consent = document.createElement('p');
+    consent.textContent = '点击“同意并继续”，表示家长同意将本次网页互动产生的文字内容保存至研究者的私有云端，仅用于本次研究。网站不会保存录音文件。';
+    start.before(consent);
     document.getElementById('guidance').after(panel);
   }
   function showThanks() {
@@ -135,23 +138,75 @@
     frame.src = path; window.scrollTo(0, 0);
   }
 
+
+  const conditionOneSteps = [
+    {
+      title: '欢迎来到科学探索！', button: '下一步',
+      content: `<p>亲爱的家长和小朋友，欢迎你们！</p>
+<p>今天，你们会一起观看一些有趣的科学小视频，聊聊视频中的奇妙现象，还会认识一位 AI 伙伴“小星”！</p>
+<p>在接下来的探索中，你们可以和小星一起提问、猜想、分享想法，探索这些有趣的科学现象。</p>
+<p>这里没有标准答案，也没有对错之分。 我们想了解的是，大家在探索科学问题时，会怎样交流和思考。</p>
+<p>所以，不用担心说错，也不需要提前准备。按照自己喜欢的方式，轻松、自由地聊天就好！</p>
+<p>准备好了吗？让我们一起开启今天的科学探索吧！</p>`
+    },
+    {
+      title: '我们可以怎样一起探索？', button: '我明白了，下一步',
+      content: `<p>在接下来的活动中，你们会一起观看科学视频，并和 AI 伙伴“小星”一起讨论视频中有趣的现象。</p>
+<p>家长和小朋友都可以自由地参与讨论！</p>
+<p>你们可以像平时一样互相交流，也可以随时和小星说话。例如：</p>
+<ul><li>向小星提出自己好奇的问题；</li><li>回答小星提出的问题；</li><li>和对方分享自己的猜想或发现；</li><li>一起聊聊小星的回答，或者继续提出新的问题。</li></ul>
+<p>你们可以根据自己的兴趣和想法，自然地交流和探索。</p>
+<p>我们希望了解大家最自然、真实的交流方式，因此不需要按照特定的方式进行交流，也不用追求正确答案。</p>`
+    },
+    {
+      title: '开始前的小准备', button: '确认并进入热身',
+      content: `<p>马上就要开始啦！请家长和小朋友先完成以下准备。</p>
+<h2>1. 打开录音</h2><p>请使用手机或其他设备的录音功能，现在开始录音，确保能够清楚录下整个活动过程中的所有声音，包括大家的说话声和网页播放的声音。</p>
+<p>如果使用同一部手机进行网页互动和录音，请确认切换到网页后，录音仍能正常进行。</p>
+<h2>2. 保持录音直到活动结束</h2><p>请在整个活动过程中保持录音，不要中途暂停或关闭，直到网页出现结束提示后再停止。</p>
+<h2>3. 先来试一试</h2><p>正式探索前，你们会先进入一个简单的热身练习，熟悉接下来的操作方式。</p>
+<p>请家长确认：</p><label style="display:block;margin:20px 0;font-size:18px"><input type="checkbox" id="phone-recording-confirmed"> 我们已经开始录音，并确认能够清楚录下活动过程中的所有声音。</label>`
+    }
+  ];
+  function showConditionOneStep(index) {
+    const step = conditionOneSteps[index], main = document.getElementById('guidance');
+    panel.hidden = true; main.hidden = false;
+    main.innerHTML = '<h1></h1>' + step.content;
+    main.querySelector('h1').textContent = step.title;
+    const button = document.createElement('button'); button.type = 'button'; button.textContent = step.button;
+    main.append(button);
+    const checkbox = main.querySelector('#phone-recording-confirmed');
+    if (checkbox) { button.disabled = true; checkbox.onchange = () => { button.disabled = !checkbox.checked; }; }
+    button.onclick = async () => {
+      if (checkbox && !checkbox.checked) return;
+      button.disabled = true;
+      await record({ kind: 'guidance_step_complete', step: index + 2, title: step.title, phoneRecordingConfirmed: checkbox ? true : undefined });
+      if (index < conditionOneSteps.length - 1) showConditionOneStep(index + 1);
+      else { current.document.phoneRecordingConfirmedAt = new Date().toISOString(); await persist(); showFrame('/warmup'); }
+    };
+    window.scrollTo(0, 0);
+  }
+
   start.onclick = async () => {
     if (guided && current && !current.ready) {
+      if (!current.document.participant.endsWith('1')) { say('本机旧记录不属于条件 1，请先联系研究者处理旧记录。'); return; }
+      current.document.condition = 'parent-ai-child'; current.document.conditionCode = '1';
       active = true; start.disabled = true;
-      showFrame('/warmup');
+      showConditionOneStep(0);
       return;
     }
     start.disabled = true;
     try {
       if (!input.value.trim()) throw new Error('请先填写家庭/被试编号');
+      if (guided && !input.value.trim().endsWith('1')) throw new Error('当前仅开放家庭 ID 尾号为 1 的活动，其他条件尚未配置，请联系研究者确认。');
       const response = await nativeFetch('/api/recording/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ consent: true }) });
       const data = await response.json(); if (!response.ok) throw new Error(data.error || '无法开始记录');
-      current = { id: data.token.split('.')[0], token: data.token, ready: false, document: { schemaVersion: 2, participant: input.value.trim(), consentAt: new Date().toISOString(), startedAt: new Date().toISOString(), endedAt: null, audioSaved: false, events: [] } };
+      current = { id: data.token.split('.')[0], token: data.token, ready: false, document: { schemaVersion: 3, condition: 'parent-ai-child', conditionCode: '1', participant: input.value.trim(), consentAt: new Date().toISOString(), startedAt: new Date().toISOString(), endedAt: null, audioSaved: false, events: [] } };
       await persist();
       if (guided) { sessionStorage.removeItem('xiaoxing-warmup-v1'); sessionStorage.removeItem('xiaoxing-warmup-handoff'); }
       active = true; input.disabled = true; stop.disabled = false;
       await record({ kind: 'session_start', page: location.pathname }); say('正在记录文字对话；热身与正式活动共用一份 JSON。');
-      if (guided) showFrame('/warmup');
+      if (guided) showConditionOneStep(0);
     } catch (error) { start.disabled = false; say(error.message); }
   };
   stop.onclick = async () => {
@@ -179,7 +234,7 @@
         if (guided) {
           // Always keep the instructions visible on entry; resume only on an explicit click.
           active = false; start.disabled = false;
-          start.textContent = '同意并进入热身 →';
+          start.textContent = '同意并继续';
           say('发现本机未结束的记录。已有文字会保留，阅读指导语后点击按钮进入热身。');
         }
       } else await flush();
