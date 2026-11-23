@@ -119,6 +119,8 @@
   window.XiaoxingRecording = {
     fetch: captureFetch,
     participant: () => current?.document.participant || '',
+    condition: () => current?.document.conditionCode,
+    record: data => active ? record(data) : Promise.resolve(),
     finish: () => stop.click(),
     openActivity() {
       if (active) void record({ kind: 'formal_activity_open', page: '/activity' });
@@ -126,6 +128,7 @@
     }
   };
   function showFrame(path) {
+    if (current?.document.conditionCode === '3') path = '/parent-child.html?phase=' + (path === '/activity' ? 'activity' : 'warmup');
     document.querySelector('main')?.setAttribute('hidden', '');
     panel.hidden = true;
     let frame = document.getElementById('formal-activity-frame');
@@ -193,9 +196,31 @@
       content: conditionOneSteps[2].content.replace('正式探索前，你们会先进入一个简单的热身练习，熟悉接下来的操作方式。', '正式探索前，小朋友会先进入一个简单的热身练习，熟悉如何按住说话、发送消息和听取小星的回复。</p><p>家长可以在热身过程中帮助孩子熟悉这些操作。正式开始后，请尽量让孩子独立与小星交流。')
     }
   ];
-  const conditionNames = { '1': 'parent-ai-child', '2': 'ai-child' };
+  const conditionThreeSteps = [
+    {
+      title: '欢迎来到科学探索！', button: '下一步',
+      content: `<p>亲爱的家长和小朋友，欢迎你们！</p>
+<p>今天，你们会一起观看一些有趣的科学小视频，聊聊视频中的奇妙现象！</p>
+<p>在接下来的探索中，你们可以一起提问、猜想、分享想法，探索这些有趣的科学现象。</p>
+<p>这里没有标准答案，也没有对错之分。 我们想了解的是，大家在探索科学问题时，会怎样交流和思考。</p>
+<p>所以，不用担心说错，也不需要提前准备。按照自己喜欢的方式，轻松、自由地聊天就好！</p>
+<p>准备好了吗？让我们一起开启今天的科学探索吧！</p>`
+    },
+    {
+      title: '我们可以怎样一起探索？', button: '我明白了，下一步',
+      content: `<p>在接下来的活动中，你们会一起观看科学视频，并讨论视频中有趣的现象。</p>
+<p>家长和小朋友都可以自由地参与讨论！</p>
+<p>你们可以像平时一样互相交流。例如：</p>
+<ul><li>提出自己好奇的问题；</li><li>回答对方提出的问题；</li><li>和对方分享自己的猜想或发现；</li><li>一起讨论不同的想法，或者继续提出新的问题。</li></ul>
+<p>你们可以根据自己的兴趣和想法，自然地交流和探索。</p>
+<p>需要特别注意的是，在整个讨论过程中，请不要使用搜索引擎、AI 工具或其他外部资料来寻找答案。 你们可以根据自己的知识、经验和想法自由讨论，即使遇到不确定的问题也完全没有关系！</p>
+<p>我们希望了解大家最自然、真实的交流方式，因此不需要按照特定的方式进行交流，也不用追求正确答案。</p>`
+    },
+    { ...conditionOneSteps[2] }
+  ];
+  const conditionNames = { '1': 'parent-ai-child', '2': 'ai-child', '3': 'parent-child' };
   function showConditionStep(index) {
-    const steps = current.document.conditionCode === '2' ? conditionTwoSteps : conditionOneSteps;
+    const steps = { '1': conditionOneSteps, '2': conditionTwoSteps, '3': conditionThreeSteps }[current.document.conditionCode];
     const step = steps[index], main = document.getElementById('guidance');
     panel.hidden = true; main.hidden = false;
     main.innerHTML = '<h1></h1>' + step.content;
@@ -227,7 +252,7 @@
     try {
       if (!input.value.trim()) throw new Error('请先填写家庭/被试编号');
       const conditionCode = input.value.trim().slice(-1);
-      if (guided && !conditionNames[conditionCode]) throw new Error('当前仅开放家庭 ID 尾号为 1 或 2 的活动，其他条件尚未配置，请联系研究者确认。');
+      if (guided && !conditionNames[conditionCode]) throw new Error('家庭 ID 尾号应为 1、2 或 3，请检查研究者提供的编号。');
       const response = await nativeFetch('/api/recording/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ consent: true }) });
       const data = await response.json(); if (!response.ok) throw new Error(data.error || '无法开始记录');
       current = { id: data.token.split('.')[0], token: data.token, ready: false, document: { schemaVersion: 3, condition: conditionNames[conditionCode], conditionCode, participant: input.value.trim(), consentAt: new Date().toISOString(), startedAt: new Date().toISOString(), endedAt: null, audioSaved: false, events: [] } };
