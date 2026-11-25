@@ -1,8 +1,9 @@
+import { VIDEO_MATERIALS } from './video-materials.js';
 export const QUESTION_FOLLOWUP = '你还有什么好奇的地方嘛？';
 
 export function buildFormalMessages(systemPrompt, currentTopic, question, history = []) {
   return [
-    { role: 'system', content: systemPrompt.trim() + (currentTopic ? `\n当前视频主题：${currentTopic}` : '') },
+    { role: 'system', content: systemPrompt.trim() + (currentTopic ? `\n当前视频主题：${currentTopic}` : '') + (VIDEO_MATERIALS[currentTopic] ? `\n视频背景资料（用于理解提问，按需参考，不必主动复述）：\n${VIDEO_MATERIALS[currentTopic]}` : '') },
     ...(Array.isArray(history) ? history : []).slice(-10)
       .filter(item => item && ['user', 'assistant'].includes(item.role) && typeof item.text === 'string')
       .map(item => ({ role: item.role, content: item.text })),

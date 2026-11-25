@@ -68,7 +68,7 @@ function openAIErrorMessage(error, fallback) {
   return error.message || fallback;
 }
 
-const TOPICS = ["遇水开花", "牙签五角星"];
+const TOPICS = ["戳不破的泡泡", "烟雾瀑布"];
 const SCIENCE_ANSWER_PROMPT_TEMPLATE = await fs.readFile(
   path.join(promptsPath, "science-answer-prompt.md"),
   "utf-8"
@@ -115,7 +115,7 @@ function chooseNextTopic(state) {
 }
 
 function buildTopicListReply() {
-  return `今天让我们一起来探索一些有趣的科学小现象吧！\n\n接下来我会分别给你播放两个科学小视频哦。每看完一个视频之后，你都可以提出任何和这个主题有关的问题。\n\n一共有两个视频主题：\n\n- 主题 1：遇水开花\n- 主题 2：牙签五角星\n\n你想先选哪个主题呢？`;
+  return `今天让我们一起来探索一些有趣的科学小现象吧！\n\n接下来我会分别给你播放两个科学小视频哦。每看完一个视频之后，你都可以提出任何和这个主题有关的问题。\n\n一共有两个视频主题：\n\n- 主题 1：戳不破的泡泡\n- 主题 2：烟雾瀑布\n\n你想先选哪个主题呢？`;
 }
 
 async function callAIProvider({ currentTopic, userQuestion, conversationHistory }) {
@@ -168,10 +168,7 @@ async function handleExperimentFlow(state, userText, userId, chatHistory = []) {
     state.childName = name;
     state.phase = "choosing_topic";
     return {
-      reply:
-        `${state.childName}你好！\n\n今天让我们一起来探索一些有趣的科学小现象吧！\n\n` +
-        `接下来我会分别给你播放两个科学小视频哦。每看完一个视频之后，你都可以提出任何和这个主题有关的问题。\n\n` +
-        `一共有两个视频主题：\n\n- 主题 1：遇水开花\n- 主题 2：牙签五角星\n\n你想先选哪个主题呢？`,
+      reply: `${state.childName}你好！\n\n${buildTopicListReply()}`,
       nextState: state,
     };
   }
@@ -434,7 +431,7 @@ app.post(
         languages: ["zh-cn"],
         prompt: req.query.mode === "warmup"
           ? "这是主试和5到6岁儿童与小星进行自由聊天的中文录音。请准确转写听到的原话，不要补充内容。"
-          : "这是 5 到 6 岁儿童关于科学视频的中文对话。主题词包括：遇水开花、牙签五角星。请准确转写听到的原话，不要补充内容。",
+          : "这是 5 到 6 岁儿童关于科学视频的中文对话。主题词包括：戳不破的泡泡、烟雾瀑布。请准确转写听到的原话，不要补充内容。",
         response_format: "json",
       });
 
