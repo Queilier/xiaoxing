@@ -328,7 +328,7 @@
     <section class="card video-card" aria-label="科学主题视频">
       <div class="badge">科学视频</div>
       <h2 class="video-heading" id="videoTitle">先开始探索</h2>
-      <p class="video-caption" id="videoCaption">选择主题后，这里会播放对应的视频。视频结束后，小星会在右侧和你讨论。</p>
+      <p class="video-caption" id="videoCaption">选择主题后，这里会播放对应的视频。视频结束后，小星会在右侧和<strong>你</strong>讨论。</p>
       <div id="videoPlaceholder" class="video-placeholder">请先在右侧点击“开始探索”，然后选择一个科学主题。</div>
       <video id="topicVideo" class="video-frame" controls playsinline preload="metadata" hidden></video>
       <div class="video-topics" aria-label="选择视频主题">
@@ -419,6 +419,9 @@
       const placeholder = document.getElementById("videoPlaceholder");
       const title = document.getElementById("videoTitle");
       const caption = document.getElementById("videoCaption");
+      let audience = "你";
+      try { if (window.parent.XiaoxingRecording?.condition() === "1") audience = "你们"; } catch {}
+      const discussionCaption = `视频结束后，小星会在右侧和<strong>${audience}</strong>讨论。`;
       document.querySelectorAll(".video-topic-button").forEach((button) => {
         button.classList.toggle("active", button.dataset.topic === topic);
       });
@@ -429,13 +432,13 @@
         replayButton.disabled = true;
         title.textContent = "先开始探索";
         placeholder.textContent = "请先在右侧点击“开始探索”，然后选择一个科学主题。";
-        caption.textContent = "选择主题后，这里会播放对应的视频。视频结束后，小星会在右侧和你讨论。";
+        caption.innerHTML = "选择主题后，这里会播放对应的视频。" + discussionCaption;
         return;
       }
 
       replayButton.disabled = false;
       title.textContent = topic;
-      caption.textContent = "可以随时暂停，或点“从头重播视频”。看完后直接向小星提问，视频结束时会自动通知小星。";
+      caption.innerHTML = "可以随时暂停，或点“从头重播视频”。" + discussionCaption;
       if (video.dataset.topic !== topic) {
         video.pause();
         video.dataset.topic = topic;
