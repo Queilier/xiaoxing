@@ -129,7 +129,7 @@
     }
   };
   function showFrame(path) {
-    if (current?.document.conditionCode === '3') path = '/parent-child.html?phase=' + (path === '/activity' ? 'activity' : 'warmup');
+    if (current?.document.conditionCode === '3') path = '/parent-child.html?phase=activity';
     document.querySelector('main')?.setAttribute('hidden', '');
     panel.hidden = true;
     let frame = document.getElementById('formal-activity-frame');
@@ -214,10 +214,13 @@
 <p>你们可以像平时一样互相交流。例如：</p>
 <ul><li>提出自己好奇的问题；</li><li>回答对方提出的问题；</li><li>和对方分享自己的猜想或发现；</li><li>一起讨论不同的想法，或者继续提出新的问题。</li></ul>
 <p>你们可以根据自己的兴趣和想法，自然地交流和探索。</p>
-<p><strong>需要特别注意的是，在整个讨论过程中，请不要使用搜索引擎、<strong>AI</strong> 工具或其他外部资料来寻找答案。</strong> 你们可以根据自己的知识、经验和想法自由讨论，即使遇到不确定的问题也完全没有关系！</p>
+<p><strong>需要特别注意的是，在整个讨论过程中，<span style="color:#d32f2f">请不要使用搜索引擎、<strong>AI</strong> 工具或其他外部资料来寻找答案</span>。</strong> 你们可以根据自己的知识、经验和想法自由讨论，即使遇到不确定的问题也完全没有关系！</p>
 <p>我们希望了解大家最自然、真实的交流方式，因此<strong>不需要按照特定的方式进行交流，也不用追求正确答案</strong>。</p>`
     },
-    { ...conditionOneSteps[2] }
+    {
+      ...conditionOneSteps[2], button: '确认并开始探索',
+      content: conditionOneSteps[2].content.replace('<h2>3. 先来试一试</h2><p>正式探索前，你们会先进入一个简单的热身练习，熟悉接下来的操作方式。</p>', '<h2>3. 准备开始</h2><p>确认录音已开始后，点击下方按钮，进入科学探索。你们可以自由选择视频，观看后一起讨论。</p>')
+    }
   ];
   const conditionNames = { '1': 'parent-ai-child', '2': 'ai-child', '3': 'parent-child' };
   function showConditionStep(index) {
@@ -256,7 +259,9 @@
       button.disabled = true;
       await record({ kind: 'guidance_step_complete', step: index + 2, title: step.title, phoneRecordingConfirmed: checkbox ? true : undefined });
       if (index < steps.length - 1) showConditionStep(index + 1);
-      else { current.document.phoneRecordingConfirmedAt = new Date().toISOString(); await persist(); showFrame('/warmup'); }
+      else { current.document.phoneRecordingConfirmedAt = new Date().toISOString(); await persist();
+        if (current.document.conditionCode === '3') { await record({ kind: 'formal_activity_open', page: '/parent-child.html' }); showFrame('/activity'); }
+        else showFrame('/warmup'); }
     };
     window.scrollTo(0, 0);
   }

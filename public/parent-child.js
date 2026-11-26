@@ -3,7 +3,7 @@ import { mergeRanges, hasFullCoverage } from './video-progress.js';
   const host = window.parent !== window ? window.parent.XiaoxingRecording : null;
   const content = document.getElementById('content'), status = document.getElementById('status');
   if (!host || host.condition() !== '3') { content.textContent = '请从网站首页输入家庭 ID 后进入活动。'; return; }
-  const phase = new URLSearchParams(location.search).get('phase');
+  const phase = 'activity';
   const topics = ['戳不破的泡泡', '烟雾瀑布'];
   const sources = { '戳不破的泡泡': '/videos/戳不破的泡泡.mp4', '烟雾瀑布': '/videos/烟雾瀑布.mp4' };
   window.experimentData = { condition: 'parent-child', participant: host.participant(), events: [], completedTopics: [] };
@@ -13,12 +13,6 @@ import { mergeRanges, hasFullCoverage } from './video-progress.js';
     return host.record(event);
   };
   void log('page_open');
-  if (phase !== 'activity') {
-    content.innerHTML = '<h1>先来熟悉一下操作</h1><p>家长和小朋友可以一起试试点击下面的按钮。正式活动中，你们会选择视频、观看并自由讨论，讨论完成后点击按钮进入下一个主题。</p><button id="practice">点我试一试</button><p id="practice-result" aria-live="polite"></p><p>熟悉好按钮后，可以点击“正式开始”，开启今天的小活动～</p><button id="begin" class="primary">正式开始 →</button>';
-    document.getElementById('practice').onclick = () => { document.getElementById('practice-result').textContent = '操作成功！你们已经会使用按钮啦。'; void log('practice_button'); };
-    document.getElementById('begin').onclick = async () => { await log('warmup_complete'); host.openActivity(); };
-    return;
-  }
   document.querySelector('style')?.remove();
   const sharedStyle = document.createElement('link'); sharedStyle.rel = 'stylesheet'; sharedStyle.href = '/activity.css'; document.head.append(sharedStyle);
   const extraStyle = document.createElement('style');
@@ -38,13 +32,13 @@ import { mergeRanges, hasFullCoverage } from './video-progress.js';
 <div class="chat-header"><div class="chat-title-row"><div class="badge">科学小视频活动</div></div></div>
 <div class="chat-box parent-guidance" tabindex="0" aria-label="活动介绍与重要提醒">
 <div><h2>一起来探索科学吧！🌟</h2><p>亲爱的家长和小朋友，你们好！</p>
-<p>今天，让我们一起来探索一些有趣的科学小现象吧！</p>
+<p>今天，你们会一起来探索一些有趣的科学小现象！</p>
 <p>接下来，你们会观看两个有趣的科学小视频。<strong>每看完一个视频，你们都可以一起聊聊视频中的现象</strong>，提出自己好奇的问题、分享猜想和发现，或者讨论彼此的想法。</p>
 <p>今天有两个科学主题：</p><ul><li><strong>主题 1：戳不破的泡泡</strong></li><li><strong>主题 2：烟雾瀑布</strong></li></ul>
-<p>你们可以自由选择观看顺序。看完一个视频后，可以先一起讨论，再选择另一个视频。</p>
+<p><strong>你们可以自由选择观看顺序。看完第一个视频后，可以先一起讨论，等讨论结束后，再选择另一个视频继续观看和讨论。</strong></p>
 <p>两个主题都探索完之后，就可以点击下方的 <strong>“结束今天的互动”</strong> 按钮啦！</p></div>
 <div class="parent-reminders" aria-label="重要提醒"><p><strong>这里没有标准答案，也没有对错之分。</strong> 遇到不确定的问题也没有关系，可以说说各自的想法。</p>
-<p><strong>讨论过程中，请不要使用搜索引擎、AI 工具或其他外部资料寻找答案。</strong></p></div></div>
+<p><strong>讨论过程中，<span style="color:#d32f2f">请不要使用搜索引擎、AI 工具或其他外部资料来寻找答案</span>。</strong></p></div></div>
 <div class="parent-finish"><button id="finishActivity" class="primary" disabled aria-describedby="finishHint">结束今天的互动</button><p id="finishHint" role="status">请先观看完两个科学视频。</p></div></section></div>`;
   const video = document.getElementById('topicVideo'), finish = document.getElementById('finishActivity');
   const videoStatus = document.getElementById('status');
